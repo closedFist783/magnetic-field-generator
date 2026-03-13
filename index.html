@@ -179,11 +179,90 @@
       color: #556677;
     }
     #info strong { color: #7a9ab5; }
+
+    /* ── Color debug bar ── */
+    #color-debug {
+      display: none;
+      gap: 16px;
+      align-items: stretch;
+      justify-content: center;
+      flex-wrap: wrap;
+      max-width: 640px;
+      width: 100%;
+    }
+
+    .color-debug-card {
+      flex: 1;
+      min-width: 180px;
+      background: #0b0e18;
+      border: 1px solid #1a2030;
+      border-radius: 5px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.75rem;
+    }
+
+    .debug-swatch {
+      width: 44px; height: 44px;
+      border-radius: 6px;
+      background: #111;
+      border: 2px solid #223;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+
+    .debug-info {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      color: #556;
+      line-height: 1.5;
+    }
+
+    .debug-info .label { color: #889; font-weight: bold; }
+    .debug-info .val   { color: #aab; font-size: 0.82rem; }
+    .debug-info .range-bar {
+      height: 6px;
+      border-radius: 3px;
+      background: #1a2030;
+      width: 100px;
+      position: relative;
+      overflow: visible;
+      margin-top: 2px;
+    }
+    .debug-info .range-fill {
+      position: absolute;
+      top: 0; height: 100%;
+      border-radius: 3px;
+      opacity: 0.7;
+    }
   </style>
 </head>
 <body>
 
   <h1>⚡ Magnetic Field Generator</h1>
+
+  <!-- Color debug bar (always visible once camera is live) -->
+  <div id="color-debug">
+    <div class="color-debug-card">
+      <div class="debug-swatch" id="dbg-swatch-0"></div>
+      <div class="debug-info">
+        <span class="label">North pole</span>
+        <span class="val" id="dbg-val-0">not sampled</span>
+        <div class="range-bar" id="dbg-bar-0"><div class="range-fill" id="dbg-fill-0"></div></div>
+      </div>
+    </div>
+    <div class="color-debug-card">
+      <div class="debug-swatch" id="dbg-swatch-1"></div>
+      <div class="debug-info">
+        <span class="label">South pole</span>
+        <span class="val" id="dbg-val-1">not sampled</span>
+        <div class="range-bar" id="dbg-bar-1"><div class="range-fill" id="dbg-fill-1"></div></div>
+      </div>
+    </div>
+  </div>
 
   <div id="container">
     <canvas id="canvas"></canvas>

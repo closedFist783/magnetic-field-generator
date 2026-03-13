@@ -32,6 +32,7 @@ navigator.mediaDevices
   .then(stream => {
     video.srcObject = stream;
     video.play();
+    document.getElementById('color-debug').style.display = 'flex';
     appState = 'cal-0';
     updateCalibrationUI();
     requestAnimationFrame(loop);
@@ -79,10 +80,13 @@ canvas.addEventListener('click', e => {
   const idx = appState === 'cal-0' ? 0 : 1;
   poles[idx].color = sample;
 
-  // Show swatch
+  // Show swatch in cal panel
   const sw = document.getElementById('cal-swatch');
-  sw.style.background = `hsl(${sample.hue},${Math.round(sample.minS * 100)}%,50%)`;
+  sw.style.background = `hsl(${sample.hue},80%,50%)`;
   sw.textContent      = '';
+
+  // Update debug bar
+  updateDebugBar(idx, sample);
 
   // Draw crosshair on canvas
   drawCrosshair(cx, cy, poles[idx].cssColor);
@@ -231,7 +235,14 @@ document.getElementById('alpha-slider').addEventListener('input', e => {
 
 document.getElementById('btn-recalibrate').addEventListener('click', () => {
   appState = 'cal-0';
-  for (const p of poles) { p.color = null; p.detected = false; }
+  for (let i = 0; i < poles.length; i++) {
+    poles[i].color = null;
+    poles[i].detected = false;
+    document.getElementById(`dbg-swatch-${i}`).style.background = '#111';
+    document.getElementById(`dbg-val-${i}`).textContent = 'not sampled';
+    document.getElementById(`dbg-fill-${i}`).style.width = '0';
+    document.getElementById(`dbg-bar-${i}`).style.background = '#1a2030';
+  }
   document.getElementById('tracking-ui').style.display = 'none';
   updateCalibrationUI();
 });
@@ -260,6 +271,7 @@ function loop() {
 
   if (appState === 'tracking') {
     updateIndicators();
+    refreshDebugBars();
     const active = poles.filter(p => p.detected);
     if (active.length > 0) drawField(active);
     for (const p of poles) {
@@ -443,6 +455,47 @@ function hslToRgb(h, s, l) {
     Math.round(hue2rgb(p, q, h    )*255),
     Math.round(hue2rgb(p, q, h-1/3)*255),
   ];
+}
+
+// ─── Debug bar ────────────────────────────────────────────────────────────────
+function updateDebugBar(idx, color) {
+  if (!color) return;
+  const hue  = Math.round(color.hue);
+  const tol  = color.hTol;
+  const minS = Math.round(color.minS * 100);
+  const minV = Math.round(color.minV * 100);
+
+  // Swatch: show the sampled hue at full sat/lightness
+  document.getElementById(`dbg-swatch-${idx}`).style.background =
+    `hsl(${hue}, 80%, 50%)`;
+
+  // Text info
+  document.getElementById(`dbg-val-${idx}`).textContent =
+    `hue ${hue}° ± ${tol}°  |  sat ≥ ${minS}%  val ≥ ${minV}%`;
+
+  // Hue range bar: show the accepted hue window on a 360° strip
+  const bar  = document.getElementById(`dbg-bar-${idx}`);
+  const fill = document.getElementById(`dbg-fill-${idx}`);
+  const lo   = ((hue - tol + 360) % 360) / 360 * 100;
+  const width = (tol * 2) / 360 * 100;
+  fill.style.left       = `${lo}%`;
+  fill.style.width      = `${width}%`;
+  fill.style.background = `hsl(${hue}, 90%, 55%)`;
+
+  // Full hue gradient behind the bar
+  bar.style.background =
+    'linear-gradient(to right,' +
+    'hsl(0,80%,45%),hsl(30,80%,45%),hsl(60,80%,45%),' +
+    'hsl(90,80%,45%),hsl(120,80%,45%),hsl(150,80%,45%),' +
+    'hsl(180,80%,45%),hsl(210,80%,45%),hsl(240,80%,45%),' +
+    'hsl(270,80%,45%),hsl(300,80%,45%),hsl(330,80%,45%),hsl(360,80%,45%))';
+}
+
+// Keep debug bar live during tracking so you can see if it drifts
+function refreshDebugBars() {
+  for (let i = 0; i < poles.length; i++) {
+    if (poles[i].color) updateDebugBar(i, poles[i].color);
+  }
 }
 
 function drawMarker(p) {
