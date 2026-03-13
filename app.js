@@ -1,4 +1,4 @@
-// ─── Setup ────────────────────────────────────────────────────────────────────
+// ─── Canvas / video setup ────────────────────────────────────────────────────
 const video  = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
@@ -7,33 +7,24 @@ const W = 640, H = 480;
 canvas.width  = W;
 canvas.height = H;
 
+// Offscreen canvas for heatmap
+const offscreen = document.createElement('canvas');
+
+// ─── State ────────────────────────────────────────────────────────────────────
+// 'init' → 'cal-0' → 'cal-1' → 'tracking'
+let appState     = 'init';
 let mode         = 'arrows';
 let overlayAlpha = 0.70;
 let demoMode     = false;
 let dragging     = null;
 
-// Offscreen canvas for heatmap
-const offscreen = document.createElement('canvas');
-
 // ─── Poles ────────────────────────────────────────────────────────────────────
-// Each pole: { name, charge, hueMin, hueMax, cssColor, x, y, detected }
-// Red  hue: 345–15 (wraps), Blue hue: 200–250
 const poles = [
-  {
-    name: 'North', charge: +1,
-    hueMin: 345, hueMax: 15,
-    cssColor: '#f55',
-    x: W * 0.35, y: H * 0.5,
-    detected: false
-  },
-  {
-    name: 'South', charge: -1,
-    hueMin: 205, hueMax: 255,
-    cssColor: '#55f',
-    x: W * 0.65, y: H * 0.5,
-    detected: false
-  }
+  { name: 'North', charge: +1, label: 'N (+)', cssColor: '#f55', x: W * 0.35, y: H * 0.5, detected: false, color: null },
+  { name: 'South', charge: -1, label: 'S (−)', cssColor: '#55f', x: W * 0.65, y: H * 0.5, detected: false, color: null },
 ];
+
+// color: { hue, hTol, minS, minV }  — learned during calibration
 
 // ─── Webcam ───────────────────────────────────────────────────────────────────
 navigator.mediaDevices
@@ -41,15 +32,148 @@ navigator.mediaDevices
   .then(stream => {
     video.srcObject = stream;
     video.play();
+    appState = 'cal-0';
+    updateCalibrationUI();
     requestAnimationFrame(loop);
   })
   .catch(() => {
     demoMode = true;
     document.getElementById('no-camera-overlay').style.display = 'block';
+    // Demo mode: skip calibration, use default positions
+    for (const p of poles) p.detected = true;
+    appState = 'tracking';
+    showTrackingUI();
     requestAnimationFrame(loop);
   });
 
-// ─── Demo-mode drag (mouse) ───────────────────────────────────────────────────
+// ─── Calibration UI ───────────────────────────────────────────────────────────
+function updateCalibrationUI() {
+  const idx = appState === 'cal-0' ? 0 : 1;
+  const p   = poles[idx];
+  document.getElementById('cal-panel').style.display = 'flex';
+  document.getElementById('cal-title').textContent   = `Step ${idx + 1} of 2`;
+  document.getElementById('cal-desc').innerHTML      =
+    `Click on your <strong style="color:${p.cssColor}">${p.name} pole</strong> ball in the camera feed.`;
+  document.getElementById('cal-swatch').style.background = '#111';
+  document.getElementById('cal-swatch').textContent      = '?';
+  document.getElementById('btn-cal-confirm').disabled    = true;
+  document.getElementById('btn-cal-confirm').textContent = idx === 0 ? 'Next →' : 'Start Tracking →';
+}
+
+function showTrackingUI() {
+  document.getElementById('cal-panel').style.display    = 'none';
+  document.getElementById('tracking-ui').style.display  = 'flex';
+}
+
+// ─── Canvas click → sample color ─────────────────────────────────────────────
+canvas.addEventListener('click', e => {
+  if (appState !== 'cal-0' && appState !== 'cal-1') return;
+
+  const rect = canvas.getBoundingClientRect();
+  const cx   = Math.round((e.clientX - rect.left)  * (W / rect.width));
+  const cy   = Math.round((e.clientY - rect.top)   * (H / rect.height));
+
+  const sample = sampleRegion(cx, cy, 24);
+  if (!sample) return;
+
+  const idx = appState === 'cal-0' ? 0 : 1;
+  poles[idx].color = sample;
+
+  // Show swatch
+  const sw = document.getElementById('cal-swatch');
+  sw.style.background = `hsl(${sample.hue},${Math.round(sample.minS * 100)}%,50%)`;
+  sw.textContent      = '';
+
+  // Draw crosshair on canvas
+  drawCrosshair(cx, cy, poles[idx].cssColor);
+
+  document.getElementById('btn-cal-confirm').disabled = false;
+});
+
+document.getElementById('btn-cal-confirm').addEventListener('click', () => {
+  if (appState === 'cal-0') {
+    appState = 'cal-1';
+    updateCalibrationUI();
+  } else if (appState === 'cal-1') {
+    appState = 'tracking';
+    showTrackingUI();
+  }
+});
+
+document.getElementById('btn-cal-redo').addEventListener('click', () => {
+  appState = 'cal-0';
+  for (const p of poles) p.color = null;
+  updateCalibrationUI();
+});
+
+// ─── Sample a region's average HSV ───────────────────────────────────────────
+function sampleRegion(cx, cy, radius) {
+  // Draw current frame to sample from
+  const tmp   = document.createElement('canvas');
+  tmp.width   = W; tmp.height = H;
+  const tctx  = tmp.getContext('2d');
+  tctx.translate(W, 0); tctx.scale(-1, 1);  // mirrored, same as main
+  tctx.drawImage(video, 0, 0, W, H);
+  tctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  const x0 = Math.max(0, cx - radius), y0 = Math.max(0, cy - radius);
+  const x1 = Math.min(W, cx + radius), y1 = Math.min(H, cy + radius);
+  const w   = x1 - x0, h = y1 - y0;
+  if (w <= 0 || h <= 0) return null;
+
+  const data = tctx.getImageData(x0, y0, w, h).data;
+
+  // Collect HSV for all pixels
+  let hues = [], sats = [], vals = [];
+  for (let i = 0; i < data.length; i += 4) {
+    const [hh, ss, vv] = rgbToHsv(data[i], data[i+1], data[i+2]);
+    if (ss > 0.2 && vv > 0.15) { hues.push(hh); sats.push(ss); vals.push(vv); }
+  }
+  if (hues.length < 10) return null;
+
+  const avgHue  = circularMeanHue(hues);
+  const avgSat  = hues.map((_, i) => sats[i]).reduce((a, b) => a + b, 0) / sats.length;
+  const avgVal  = vals.reduce((a, b) => a + b, 0) / vals.length;
+
+  // Tolerance: ±25° hue, allow saturation down to 30% of sampled, value down to 20%
+  return {
+    hue:  avgHue,
+    hTol: 28,
+    minS: Math.max(0.25, avgSat * 0.40),
+    minV: Math.max(0.15, avgVal * 0.30),
+  };
+}
+
+function circularMeanHue(hues) {
+  // Convert to radians, average as unit vectors
+  let sx = 0, sy = 0;
+  for (const h of hues) {
+    const r = (h / 180) * Math.PI;
+    sx += Math.cos(r); sy += Math.sin(r);
+  }
+  let mean = Math.atan2(sy / hues.length, sx / hues.length) * (180 / Math.PI);
+  if (mean < 0) mean += 360;
+  return mean;
+}
+
+function drawCrosshair(cx, cy, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = 2;
+  ctx.shadowColor = color;
+  ctx.shadowBlur  = 8;
+  const r = 24;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - r - 8, cy); ctx.lineTo(cx + r + 8, cy);
+  ctx.moveTo(cx, cy - r - 8); ctx.lineTo(cx, cy + r + 8);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ─── Demo-mode drag ───────────────────────────────────────────────────────────
 function getCanvasPos(e) {
   const rect = canvas.getBoundingClientRect();
   return {
@@ -59,7 +183,7 @@ function getCanvasPos(e) {
 }
 
 canvas.addEventListener('mousedown', e => {
-  if (!demoMode) return;
+  if (!demoMode || appState !== 'tracking') return;
   const { x, y } = getCanvasPos(e);
   for (const p of poles) {
     if ((x - p.x) ** 2 + (y - p.y) ** 2 < 1200) { dragging = p; return; }
@@ -68,15 +192,13 @@ canvas.addEventListener('mousedown', e => {
 canvas.addEventListener('mousemove', e => {
   if (!dragging) return;
   const pos = getCanvasPos(e);
-  dragging.x = pos.x;
-  dragging.y = pos.y;
+  dragging.x = pos.x; dragging.y = pos.y;
 });
 canvas.addEventListener('mouseup',    () => dragging = null);
 canvas.addEventListener('mouseleave', () => dragging = null);
 
-// Touch
 canvas.addEventListener('touchstart', e => {
-  if (!demoMode) return;
+  if (!demoMode || appState !== 'tracking') return;
   e.preventDefault();
   const rect = canvas.getBoundingClientRect();
   const t = e.touches[0];
@@ -99,7 +221,7 @@ canvas.addEventListener('touchend', () => dragging = null);
 // ─── Controls ─────────────────────────────────────────────────────────────────
 function setMode(m) {
   mode = m;
-  document.querySelectorAll('#controls button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.btn-mode').forEach(b => b.classList.remove('active'));
   document.getElementById('btn-' + m).classList.add('active');
 }
 
@@ -107,34 +229,42 @@ document.getElementById('alpha-slider').addEventListener('input', e => {
   overlayAlpha = e.target.value / 100;
 });
 
+document.getElementById('btn-recalibrate').addEventListener('click', () => {
+  appState = 'cal-0';
+  for (const p of poles) { p.color = null; p.detected = false; }
+  document.getElementById('tracking-ui').style.display = 'none';
+  updateCalibrationUI();
+});
+
 // ─── Main loop ────────────────────────────────────────────────────────────────
 function loop() {
   ctx.clearRect(0, 0, W, H);
 
   if (!demoMode && video.readyState >= 2) {
-    // Mirror the video horizontally for natural "mirror" feel
     ctx.save();
-    ctx.translate(W, 0);
-    ctx.scale(-1, 1);
+    ctx.translate(W, 0); ctx.scale(-1, 1);
     ctx.drawImage(video, 0, 0, W, H);
     ctx.restore();
 
-    // Track on the mirrored frame
-    const frame = ctx.getImageData(0, 0, W, H);
-    for (const p of poles) trackBall(frame, p);
+    if (appState === 'tracking') {
+      const frame = ctx.getImageData(0, 0, W, H);
+      for (const p of poles) {
+        if (p.color) trackBall(frame, p);
+      }
+    }
   } else if (demoMode) {
     ctx.fillStyle = '#07070f';
     ctx.fillRect(0, 0, W, H);
     for (const p of poles) p.detected = true;
   }
 
-  updateIndicators();
-
-  const active = poles.filter(p => p.detected);
-  if (active.length > 0) drawField(active);
-
-  for (const p of poles) {
-    if (p.detected) drawMarker(p);
+  if (appState === 'tracking') {
+    updateIndicators();
+    const active = poles.filter(p => p.detected);
+    if (active.length > 0) drawField(active);
+    for (const p of poles) {
+      if (p.detected) drawMarker(p);
+    }
   }
 
   requestAnimationFrame(loop);
@@ -145,9 +275,8 @@ function rgbToHsv(r, g, b) {
   r /= 255; g /= 255; b /= 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
   let h, s = max === 0 ? 0 : d / max, v = max;
-  if (d === 0) {
-    h = 0;
-  } else {
+  if (d === 0) { h = 0; }
+  else {
     switch (max) {
       case r: h = ((g - b) / d % 6) * 60; break;
       case g: h = ((b - r) / d + 2) * 60; break;
@@ -158,27 +287,27 @@ function rgbToHsv(r, g, b) {
   return [h, s, v];
 }
 
-function inHue(h, min, max) {
-  return min > max ? h >= min || h <= max : h >= min && h <= max;
+function inHueTol(h, center, tol) {
+  let diff = Math.abs(h - center) % 360;
+  if (diff > 180) diff = 360 - diff;
+  return diff <= tol;
 }
 
 function trackBall(frame, pole) {
   const data = frame.data;
+  const { hue, hTol, minS, minV } = pole.color;
   let sx = 0, sy = 0, n = 0;
-  // Sample every 3rd pixel
   for (let y = 0; y < H; y += 3) {
     for (let x = 0; x < W; x += 3) {
       const i = (y * W + x) * 4;
-      const [h, s, v] = rgbToHsv(data[i], data[i + 1], data[i + 2]);
-      if (s > 0.42 && v > 0.28 && inHue(h, pole.hueMin, pole.hueMax)) {
+      const [h, s, v] = rgbToHsv(data[i], data[i+1], data[i+2]);
+      if (s >= minS && v >= minV && inHueTol(h, hue, hTol)) {
         sx += x; sy += y; n++;
       }
     }
   }
   if (n > 25) {
-    pole.x = sx / n;
-    pole.y = sy / n;
-    pole.detected = true;
+    pole.x = sx / n; pole.y = sy / n; pole.detected = true;
   } else {
     pole.detected = false;
   }
@@ -191,10 +320,9 @@ function fieldAt(x, y, activePoles) {
     const dx = x - p.x, dy = y - p.y;
     const r2 = dx * dx + dy * dy;
     if (r2 < 64) continue;
-    const r  = Math.sqrt(r2);
-    const k  = p.charge / r2;
-    fx += k * dx / r;
-    fy += k * dy / r;
+    const r = Math.sqrt(r2);
+    const k = p.charge / r2;
+    fx += k * dx / r; fy += k * dy / r;
   }
   return [fx, fy];
 }
@@ -206,35 +334,27 @@ function drawField(active) {
   else if (mode === 'heat') drawHeatmap(active);
 }
 
-// — Arrows —
 function drawArrows(active) {
   const step = 28;
-  ctx.save();
-  ctx.globalAlpha = overlayAlpha;
-
+  ctx.save(); ctx.globalAlpha = overlayAlpha;
   for (let y = step / 2; y < H; y += step) {
     for (let x = step / 2; x < W; x += step) {
       const [fx, fy] = fieldAt(x, y, active);
       const mag = Math.hypot(fx, fy);
       if (mag < 1e-8) continue;
-
       const nx = fx / mag, ny = fy / mag;
       const len = Math.min(step * 0.78, 400 * mag);
       if (len < 3) continue;
-
       const angle = Math.atan2(fy, fx);
       const hue   = ((angle + Math.PI) / (2 * Math.PI)) * 360;
       const bri   = Math.min(88, 48 + Math.log10(mag * 1000 + 1) * 15);
-
       const x1 = x - nx * len / 2, y1 = y - ny * len / 2;
       const x2 = x + nx * len / 2, y2 = y + ny * len / 2;
       const hl  = Math.max(5, len * 0.28);
-
       ctx.strokeStyle = `hsl(${hue},95%,${bri}%)`;
       ctx.lineWidth   = 1.6;
       ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
+      ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
       ctx.moveTo(x2 - hl * Math.cos(angle - 0.45), y2 - hl * Math.sin(angle - 0.45));
       ctx.lineTo(x2, y2);
       ctx.lineTo(x2 - hl * Math.cos(angle + 0.45), y2 - hl * Math.sin(angle + 0.45));
@@ -244,58 +364,34 @@ function drawArrows(active) {
   ctx.restore();
 }
 
-// — Field Lines —
 function drawFieldLines(active) {
   const northPoles = active.filter(p => p.charge > 0);
-  const nLines     = 18;
-  const stepSize   = 5;
-  const maxSteps   = 250;
-
-  // If no north poles, seed from south (reversed)
+  const nLines = 18, stepSize = 5, maxSteps = 250;
   const seeds    = northPoles.length > 0 ? northPoles : active.filter(p => p.charge < 0);
   const reversed = northPoles.length === 0;
-
-  ctx.save();
-  ctx.globalAlpha = overlayAlpha;
-  ctx.lineWidth   = 1.6;
-
+  ctx.save(); ctx.globalAlpha = overlayAlpha; ctx.lineWidth = 1.6;
   for (const pole of seeds) {
     for (let i = 0; i < nLines; i++) {
       const a = (i / nLines) * Math.PI * 2;
-      let x   = pole.x + 20 * Math.cos(a);
-      let y   = pole.y + 20 * Math.sin(a);
-
+      let x = pole.x + 20 * Math.cos(a);
+      let y = pole.y + 20 * Math.sin(a);
       const pts = [[x, y]];
-
       for (let s = 0; s < maxSteps; s++) {
         const [fx, fy] = fieldAt(x, y, active);
         const mag = Math.hypot(fx, fy);
         if (mag < 1e-8) break;
-
         x += (reversed ? -1 : 1) * (fx / mag) * stepSize;
         y += (reversed ? -1 : 1) * (fy / mag) * stepSize;
-
         if (x < 0 || x > W || y < 0 || y > H) break;
-
         pts.push([x, y]);
-
-        const hitSink = active.find(p =>
-          p.charge !== pole.charge && Math.hypot(p.x - x, p.y - y) < 18
-        );
+        const hitSink = active.find(p => p.charge !== pole.charge && Math.hypot(p.x - x, p.y - y) < 18);
         if (hitSink) break;
       }
-
       if (pts.length < 3) continue;
-
-      // Draw with a gradient red→blue
-      const grad = ctx.createLinearGradient(
-        pts[0][0], pts[0][1],
-        pts[pts.length - 1][0], pts[pts.length - 1][1]
-      );
+      const grad = ctx.createLinearGradient(pts[0][0], pts[0][1], pts[pts.length-1][0], pts[pts.length-1][1]);
       grad.addColorStop(0,   reversed ? '#55f' : '#f55');
       grad.addColorStop(0.5, '#aaf');
       grad.addColorStop(1,   reversed ? '#f55' : '#55f');
-
       ctx.strokeStyle = grad;
       ctx.beginPath();
       ctx.moveTo(pts[0][0], pts[0][1]);
@@ -303,85 +399,63 @@ function drawFieldLines(active) {
       ctx.stroke();
     }
   }
-
   ctx.restore();
 }
 
-// — Heatmap —
 function drawHeatmap(active) {
   const scale = 5;
-  const sw    = Math.ceil(W / scale);
-  const sh    = Math.ceil(H / scale);
-
-  offscreen.width  = sw;
-  offscreen.height = sh;
+  const sw = Math.ceil(W / scale), sh = Math.ceil(H / scale);
+  offscreen.width = sw; offscreen.height = sh;
   const octx = offscreen.getContext('2d');
   const img  = octx.createImageData(sw, sh);
   const d    = img.data;
-
   for (let py = 0; py < sh; py++) {
     for (let px = 0; px < sw; px++) {
       const [fx, fy] = fieldAt(px * scale, py * scale, active);
-      const mag      = Math.hypot(fx, fy);
-      const angle    = Math.atan2(fy, fx);
-      const hue      = ((angle + Math.PI) / (2 * Math.PI)) * 360;
-      const t        = Math.min(1, Math.log10(mag * 800 + 1) / 4);
+      const mag   = Math.hypot(fx, fy);
+      const angle = Math.atan2(fy, fx);
+      const hue   = ((angle + Math.PI) / (2 * Math.PI)) * 360;
+      const t     = Math.min(1, Math.log10(mag * 800 + 1) / 4);
       const [r, g, b] = hslToRgb(hue / 360, 0.9, 0.1 + t * 0.55);
       const i = (py * sw + px) * 4;
-      d[i] = r; d[i + 1] = g; d[i + 2] = b;
-      d[i + 3] = Math.round(overlayAlpha * 210);
+      d[i] = r; d[i+1] = g; d[i+2] = b; d[i+3] = Math.round(overlayAlpha * 210);
     }
   }
-
   octx.putImageData(img, 0, 0);
-
   ctx.save();
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(offscreen, 0, 0, W, H);
   ctx.restore();
 }
 
-// ─── HSL→RGB ──────────────────────────────────────────────────────────────────
 function hslToRgb(h, s, l) {
   const hue2rgb = (p, q, t) => {
-    if (t < 0) t += 1;
-    if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1/6) return p + (q-p)*6*t;
+    if (t < 1/2) return q;
+    if (t < 2/3) return p + (q-p)*(2/3-t)*6;
     return p;
   };
-  if (s === 0) return [l, l, l].map(v => Math.round(v * 255));
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
+  if (s === 0) return [l,l,l].map(v => Math.round(v*255));
+  const q = l < 0.5 ? l*(1+s) : l+s-l*s, p = 2*l-q;
   return [
-    Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
-    Math.round(hue2rgb(p, q, h)         * 255),
-    Math.round(hue2rgb(p, q, h - 1 / 3) * 255)
+    Math.round(hue2rgb(p, q, h+1/3)*255),
+    Math.round(hue2rgb(p, q, h    )*255),
+    Math.round(hue2rgb(p, q, h-1/3)*255),
   ];
 }
 
-// ─── Pole markers ─────────────────────────────────────────────────────────────
 function drawMarker(p) {
   ctx.save();
-  ctx.strokeStyle  = p.cssColor;
-  ctx.lineWidth    = 2.5;
-  ctx.shadowColor  = p.cssColor;
-  ctx.shadowBlur   = 12;
-  ctx.beginPath();
-  ctx.arc(p.x, p.y, 22, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.shadowBlur   = 0;
-  ctx.fillStyle    = p.cssColor;
-  ctx.font         = 'bold 12px Courier New';
-  ctx.textAlign    = 'center';
-  ctx.fillText(p.charge > 0 ? 'N (+)' : 'S (−)', p.x, p.y - 30);
+  ctx.strokeStyle = p.cssColor; ctx.lineWidth = 2.5;
+  ctx.shadowColor = p.cssColor; ctx.shadowBlur = 12;
+  ctx.beginPath(); ctx.arc(p.x, p.y, 22, 0, Math.PI * 2); ctx.stroke();
+  ctx.shadowBlur = 0; ctx.fillStyle = p.cssColor;
+  ctx.font = 'bold 12px Courier New'; ctx.textAlign = 'center';
+  ctx.fillText(p.label, p.x, p.y - 30);
   ctx.restore();
 }
 
-// ─── Indicators ───────────────────────────────────────────────────────────────
 function updateIndicators() {
   document.getElementById('dot-north').className = 'dot' + (poles[0].detected ? ' on' : '');
   document.getElementById('dot-south').className = 'dot' + (poles[1].detected ? ' on' : '');

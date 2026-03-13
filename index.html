@@ -34,10 +34,11 @@
       overflow: hidden;
       box-shadow: 0 0 40px #0004;
       max-width: 100%;
+      cursor: crosshair;
     }
 
     #canvas { display: block; max-width: 100%; height: auto; }
-    video { display: none; }
+    video   { display: none; }
 
     #no-camera-overlay {
       display: none;
@@ -51,6 +52,68 @@
       font-size: 0.72rem;
       color: #88a;
       white-space: nowrap;
+      pointer-events: none;
+    }
+
+    /* ── Calibration panel ── */
+    #cal-panel {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      background: #0b0e18;
+      border: 1px solid #1e3050;
+      border-radius: 6px;
+      padding: 16px 24px;
+      max-width: 440px;
+      width: 100%;
+      text-align: center;
+    }
+
+    #cal-title {
+      font-size: 0.75rem;
+      color: #446;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    #cal-desc {
+      font-size: 0.88rem;
+      color: #aab;
+      line-height: 1.6;
+    }
+
+    #cal-swatch-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.78rem;
+      color: #556;
+    }
+
+    #cal-swatch {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: #111;
+      border: 2px solid #223;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem; color: #446;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+
+    #cal-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    /* ── Tracking UI ── */
+    #tracking-ui {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
     }
 
     #status-bar {
@@ -59,11 +122,7 @@
       font-size: 0.8rem;
     }
 
-    .pole-status {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+    .pole-status { display: flex; align-items: center; gap: 8px; }
 
     .dot {
       width: 9px; height: 9px;
@@ -97,24 +156,20 @@
       font-size: 0.78rem;
       transition: background 0.15s, color 0.15s;
     }
-    button:hover { background: #162540; color: #acd; }
-    button.active { background: #0e2d4a; color: #7af; border-color: #3a7ab5; }
+    button:hover:not(:disabled) { background: #162540; color: #acd; }
+    button.active  { background: #0e2d4a; color: #7af; border-color: #3a7ab5; }
+    button:disabled { opacity: 0.35; cursor: default; }
+    button.danger  { border-color: #5a1e1e; color: #a88; }
+    button.danger:hover { background: #2a1010; color: #c99; }
 
     .slider-wrap {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.78rem;
-      color: #667;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.78rem; color: #667;
     }
-    input[type=range] {
-      width: 80px;
-      accent-color: #3a7ab5;
-    }
+    input[type=range] { width: 80px; accent-color: #3a7ab5; }
 
     #info {
-      max-width: 640px;
-      width: 100%;
+      max-width: 640px; width: 100%;
       background: #0b0e18;
       border: 1px solid #1a2030;
       border-radius: 5px;
@@ -124,8 +179,6 @@
       color: #556677;
     }
     #info strong { color: #7a9ab5; }
-    #info .north-label { color: #f77; }
-    #info .south-label { color: #77f; }
   </style>
 </head>
 <body>
@@ -138,35 +191,52 @@
     <div id="no-camera-overlay">📷 No camera — demo mode (drag poles)</div>
   </div>
 
-  <div id="status-bar">
-    <div class="pole-status">
-      <div class="dot" id="dot-north"></div>
-      <span class="north-label">North pole (red)</span>
+  <!-- Calibration panel (shown first) -->
+  <div id="cal-panel">
+    <div id="cal-title">Step 1 of 2</div>
+    <div id="cal-desc">Loading camera…</div>
+    <div id="cal-swatch-wrap">
+      <div id="cal-swatch">?</div>
+      <span>Click a spot on your ball in the camera feed above to sample its color.</span>
     </div>
-    <div class="pole-status">
-      <div class="dot" id="dot-south"></div>
-      <span class="south-label">South pole (blue)</span>
+    <div id="cal-actions">
+      <button id="btn-cal-redo" class="danger">↺ Start over</button>
+      <button id="btn-cal-confirm" disabled>Next →</button>
     </div>
   </div>
 
-  <div id="controls">
-    <div class="btn-group">
-      <button id="btn-arrows" class="active" onclick="setMode('arrows')">Arrows</button>
-      <button id="btn-lines"  onclick="setMode('lines')">Field Lines</button>
-      <button id="btn-heat"   onclick="setMode('heat')">Heatmap</button>
+  <!-- Tracking UI (shown after calibration) -->
+  <div id="tracking-ui">
+    <div id="status-bar">
+      <div class="pole-status">
+        <div class="dot" id="dot-north"></div>
+        <span class="north-label">North pole</span>
+      </div>
+      <div class="pole-status">
+        <div class="dot" id="dot-south"></div>
+        <span class="south-label">South pole</span>
+      </div>
     </div>
-    <div class="slider-wrap">
-      Overlay
-      <input type="range" id="alpha-slider" min="15" max="100" value="70">
+
+    <div id="controls">
+      <div class="btn-group">
+        <button id="btn-arrows" class="btn-mode active" onclick="setMode('arrows')">Arrows</button>
+        <button id="btn-lines"  class="btn-mode"        onclick="setMode('lines')">Field Lines</button>
+        <button id="btn-heat"   class="btn-mode"        onclick="setMode('heat')">Heatmap</button>
+      </div>
+      <div class="slider-wrap">
+        Overlay
+        <input type="range" id="alpha-slider" min="15" max="100" value="70">
+      </div>
+      <button id="btn-recalibrate" class="danger">↺ Recalibrate</button>
     </div>
   </div>
 
   <div id="info">
-    <strong>How to use:</strong><br>
-    Hold a <span class="north-label"><strong>red object</strong></span> (North +) and a
-    <span class="south-label"><strong>blue object</strong></span> (South −) in front of your webcam.
-    The live magnetic field appears as an overlay in real time.<br><br>
-    No camera? Drag the glowing circles with your mouse. Add more poles via the button above.
+    <strong>How it works:</strong><br>
+    First, click on each ball in the camera feed to teach the app its color.
+    Then hold both objects in frame — the live magnetic field appears as an overlay.<br><br>
+    Works with any two distinctly colored objects. Bright, saturated colors against a neutral background work best.
   </div>
 
   <script src="app.js"></script>
