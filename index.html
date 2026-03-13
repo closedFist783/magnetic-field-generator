@@ -27,159 +27,6 @@
       margin-top: 4px;
     }
 
-    #container {
-      position: relative;
-      border: 1px solid #1e2a3a;
-      border-radius: 6px;
-      overflow: hidden;
-      box-shadow: 0 0 40px #0004;
-      max-width: 100%;
-      cursor: crosshair;
-    }
-
-    #canvas { display: block; max-width: 100%; height: auto; }
-    video   { display: none; }
-
-    #no-camera-overlay {
-      display: none;
-      position: absolute;
-      top: 10px; left: 50%;
-      transform: translateX(-50%);
-      background: #0008;
-      border: 1px solid #336;
-      border-radius: 4px;
-      padding: 6px 14px;
-      font-size: 0.72rem;
-      color: #88a;
-      white-space: nowrap;
-      pointer-events: none;
-    }
-
-    /* ── Calibration panel ── */
-    #cal-panel {
-      display: none;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-      background: #0b0e18;
-      border: 1px solid #1e3050;
-      border-radius: 6px;
-      padding: 16px 24px;
-      max-width: 440px;
-      width: 100%;
-      text-align: center;
-    }
-
-    #cal-title {
-      font-size: 0.75rem;
-      color: #446;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-    }
-
-    #cal-desc {
-      font-size: 0.88rem;
-      color: #aab;
-      line-height: 1.6;
-    }
-
-    #cal-swatch-wrap {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 0.78rem;
-      color: #556;
-    }
-
-    #cal-swatch {
-      width: 36px; height: 36px;
-      border-radius: 50%;
-      background: #111;
-      border: 2px solid #223;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1rem; color: #446;
-      flex-shrink: 0;
-      transition: background 0.3s;
-    }
-
-    #cal-actions {
-      display: flex;
-      gap: 10px;
-    }
-
-    /* ── Tracking UI ── */
-    #tracking-ui {
-      display: none;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-      width: 100%;
-    }
-
-    #status-bar {
-      display: flex;
-      gap: 24px;
-      font-size: 0.8rem;
-    }
-
-    .pole-status { display: flex; align-items: center; gap: 8px; }
-
-    .dot {
-      width: 9px; height: 9px;
-      border-radius: 50%;
-      background: #222;
-      transition: background 0.2s, box-shadow 0.2s;
-    }
-    .dot.on { background: #3f3; box-shadow: 0 0 6px #3f3; }
-
-    .north-label { color: #f77; }
-    .south-label { color: #77f; }
-
-    #controls {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .btn-group { display: flex; gap: 4px; }
-
-    button {
-      background: #101828;
-      border: 1px solid #1e3a5a;
-      color: #8ab;
-      padding: 6px 14px;
-      border-radius: 3px;
-      cursor: pointer;
-      font-family: inherit;
-      font-size: 0.78rem;
-      transition: background 0.15s, color 0.15s;
-    }
-    button:hover:not(:disabled) { background: #162540; color: #acd; }
-    button.active  { background: #0e2d4a; color: #7af; border-color: #3a7ab5; }
-    button:disabled { opacity: 0.35; cursor: default; }
-    button.danger  { border-color: #5a1e1e; color: #a88; }
-    button.danger:hover { background: #2a1010; color: #c99; }
-
-    .slider-wrap {
-      display: flex; align-items: center; gap: 8px;
-      font-size: 0.78rem; color: #667;
-    }
-    input[type=range] { width: 80px; accent-color: #3a7ab5; }
-
-    #info {
-      max-width: 640px; width: 100%;
-      background: #0b0e18;
-      border: 1px solid #1a2030;
-      border-radius: 5px;
-      padding: 12px 16px;
-      font-size: 0.78rem;
-      line-height: 1.8;
-      color: #556677;
-    }
-    #info strong { color: #7a9ab5; }
-
     /* ── Color debug bar ── */
     #color-debug {
       display: none;
@@ -190,61 +37,150 @@
       max-width: 640px;
       width: 100%;
     }
-
     .color-debug-card {
-      flex: 1;
-      min-width: 180px;
-      background: #0b0e18;
-      border: 1px solid #1a2030;
-      border-radius: 5px;
-      padding: 10px 14px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
+      flex: 1; min-width: 180px;
+      background: #0b0e18; border: 1px solid #1a2030;
+      border-radius: 5px; padding: 10px 14px;
+      display: flex; align-items: center; gap: 12px;
       font-size: 0.75rem;
     }
-
     .debug-swatch {
-      width: 44px; height: 44px;
-      border-radius: 6px;
-      background: #111;
-      border: 2px solid #223;
-      flex-shrink: 0;
-      transition: background 0.3s;
+      width: 44px; height: 44px; border-radius: 6px;
+      background: #111; border: 2px solid #223;
+      flex-shrink: 0; transition: background 0.3s;
     }
-
-    .debug-info {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-      color: #556;
-      line-height: 1.5;
-    }
-
+    .debug-info { display: flex; flex-direction: column; gap: 3px; color: #556; line-height: 1.5; }
     .debug-info .label { color: #889; font-weight: bold; }
     .debug-info .val   { color: #aab; font-size: 0.82rem; }
     .debug-info .range-bar {
-      height: 6px;
-      border-radius: 3px;
-      background: #1a2030;
-      width: 100px;
-      position: relative;
-      overflow: visible;
-      margin-top: 2px;
+      height: 6px; border-radius: 3px; background: #1a2030;
+      width: 100px; position: relative; overflow: visible; margin-top: 2px;
     }
     .debug-info .range-fill {
-      position: absolute;
-      top: 0; height: 100%;
-      border-radius: 3px;
-      opacity: 0.7;
+      position: absolute; top: 0; height: 100%;
+      border-radius: 3px; opacity: 0.85;
     }
+
+    /* ── Canvas container ── */
+    #container {
+      position: relative;
+      border: 1px solid #1e2a3a; border-radius: 6px;
+      overflow: hidden; box-shadow: 0 0 40px #0004;
+      max-width: 100%; cursor: crosshair;
+    }
+    #canvas { display: block; max-width: 100%; height: auto; }
+    video { display: none; }
+    #no-camera-overlay {
+      display: none; position: absolute;
+      top: 10px; left: 50%; transform: translateX(-50%);
+      background: #0008; border: 1px solid #336;
+      border-radius: 4px; padding: 6px 14px;
+      font-size: 0.72rem; color: #88a; white-space: nowrap; pointer-events: none;
+    }
+
+    /* ── Calibration panel ── */
+    #cal-panel {
+      display: none; flex-direction: column; align-items: center; gap: 12px;
+      background: #0b0e18; border: 1px solid #1e3050; border-radius: 6px;
+      padding: 16px 24px; max-width: 440px; width: 100%; text-align: center;
+    }
+    #cal-title { font-size: 0.75rem; color: #446; letter-spacing: 2px; text-transform: uppercase; }
+    #cal-desc  { font-size: 0.88rem; color: #aab; line-height: 1.6; }
+    #cal-swatch-wrap { display: flex; align-items: center; gap: 12px; font-size: 0.78rem; color: #556; }
+    #cal-swatch {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: #111; border: 2px solid #223;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem; color: #446; flex-shrink: 0; transition: background 0.3s;
+    }
+    #cal-actions { display: flex; gap: 10px; }
+
+    /* ── Tracking UI ── */
+    #tracking-ui {
+      display: none; flex-direction: column; align-items: center; gap: 12px; width: 100%;
+    }
+
+    #status-bar { display: flex; gap: 24px; font-size: 0.8rem; }
+    .pole-status { display: flex; align-items: center; gap: 8px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #222; transition: background 0.2s, box-shadow 0.2s; }
+    .dot.on { background: #3f3; box-shadow: 0 0 6px #3f3; }
+    .north-label { color: #f77; }
+    .south-label { color: #77f; }
+
+    /* ── Controls ── */
+    #controls {
+      display: flex; flex-wrap: wrap; gap: 10px;
+      align-items: center; justify-content: center;
+    }
+    .btn-group { display: flex; gap: 4px; }
+
+    button {
+      background: #101828; border: 1px solid #1e3a5a; color: #8ab;
+      padding: 6px 14px; border-radius: 3px; cursor: pointer;
+      font-family: inherit; font-size: 0.78rem;
+      transition: background 0.15s, color 0.15s;
+    }
+    button:hover:not(:disabled) { background: #162540; color: #acd; }
+    button.active  { background: #0e2d4a; color: #7af; border-color: #3a7ab5; }
+    button:disabled { opacity: 0.35; cursor: default; }
+    button.danger  { border-color: #5a1e1e; color: #a88; }
+    button.danger:hover { background: #2a1010; color: #c99; }
+
+    /* ── Physics sliders panel ── */
+    #physics-panel {
+      max-width: 640px; width: 100%;
+      background: #0b0e18; border: 1px solid #1a2030;
+      border-radius: 6px; overflow: hidden;
+    }
+    #physics-header {
+      padding: 9px 16px; cursor: pointer;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 0.78rem; color: #7a9ab5; user-select: none;
+      border-bottom: 1px solid #1a2030;
+    }
+    #physics-header:hover { background: #0d1220; }
+    #physics-body {
+      padding: 14px 16px; display: grid;
+      grid-template-columns: 1fr 1fr; gap: 14px 24px;
+    }
+
+    .slider-row {
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .slider-row label {
+      font-size: 0.72rem; color: #667; display: flex;
+      justify-content: space-between; align-items: center;
+    }
+    .slider-row label span { color: #aab; min-width: 38px; text-align: right; }
+    .slider-row input[type=range] { width: 100%; accent-color: #3a7ab5; }
+
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 0.72rem; color: #667; grid-column: span 2;
+    }
+    .toggle-row input[type=checkbox] { accent-color: #3a7ab5; transform: scale(1.2); }
+
+    .section-label {
+      font-size: 0.68rem; color: #446; text-transform: uppercase;
+      letter-spacing: 2px; grid-column: span 2; margin-top: 4px;
+      border-bottom: 1px solid #151c2a; padding-bottom: 4px;
+    }
+
+    /* ── Info ── */
+    #info {
+      max-width: 640px; width: 100%;
+      background: #0b0e18; border: 1px solid #1a2030;
+      border-radius: 5px; padding: 12px 16px;
+      font-size: 0.78rem; line-height: 1.8; color: #556677;
+    }
+    #info strong { color: #7a9ab5; }
   </style>
 </head>
 <body>
 
   <h1>⚡ Magnetic Field Generator</h1>
 
-  <!-- Color debug bar (always visible once camera is live) -->
+  <!-- Color debug bar -->
   <div id="color-debug">
     <div class="color-debug-card">
       <div class="debug-swatch" id="dbg-swatch-0"></div>
@@ -270,13 +206,13 @@
     <div id="no-camera-overlay">📷 No camera — demo mode (drag poles)</div>
   </div>
 
-  <!-- Calibration panel (shown first) -->
+  <!-- Calibration panel -->
   <div id="cal-panel">
     <div id="cal-title">Step 1 of 2</div>
     <div id="cal-desc">Loading camera…</div>
     <div id="cal-swatch-wrap">
       <div id="cal-swatch">?</div>
-      <span>Click a spot on your ball in the camera feed above to sample its color.</span>
+      <span>Click on your ball in the camera feed above to sample its color.</span>
     </div>
     <div id="cal-actions">
       <button id="btn-cal-redo" class="danger">↺ Start over</button>
@@ -284,7 +220,7 @@
     </div>
   </div>
 
-  <!-- Tracking UI (shown after calibration) -->
+  <!-- Tracking UI -->
   <div id="tracking-ui">
     <div id="status-bar">
       <div class="pole-status">
@@ -299,23 +235,75 @@
 
     <div id="controls">
       <div class="btn-group">
-        <button id="btn-arrows" class="btn-mode active" onclick="setMode('arrows')">Arrows</button>
-        <button id="btn-lines"  class="btn-mode"        onclick="setMode('lines')">Field Lines</button>
+        <button id="btn-lines"  class="btn-mode active" onclick="setMode('lines')">Field Lines</button>
+        <button id="btn-arrows" class="btn-mode"        onclick="setMode('arrows')">Vector Field</button>
         <button id="btn-heat"   class="btn-mode"        onclick="setMode('heat')">Heatmap</button>
-      </div>
-      <div class="slider-wrap">
-        Overlay
-        <input type="range" id="alpha-slider" min="15" max="100" value="70">
       </div>
       <button id="btn-recalibrate" class="danger">↺ Recalibrate</button>
     </div>
   </div>
 
+  <!-- Physics sliders -->
+  <div id="physics-panel">
+    <div id="physics-header" onclick="togglePhysics()">
+      ⚙ Physics Parameters <span id="physics-arrow">▼</span>
+    </div>
+    <div id="physics-body">
+
+      <div class="section-label">Dipole Moments</div>
+
+      <div class="slider-row">
+        <label>North strength <span id="lbl-qN">1.0</span></label>
+        <input type="range" id="sl-qN" min="0.1" max="5" step="0.1" value="1.0">
+      </div>
+      <div class="slider-row">
+        <label>South strength <span id="lbl-qS">1.0</span></label>
+        <input type="range" id="sl-qS" min="0.1" max="5" step="0.1" value="1.0">
+      </div>
+
+      <div class="toggle-row">
+        <label for="chk-vel">Moment direction follows ball velocity</label>
+        <input type="checkbox" id="chk-vel" checked>
+      </div>
+
+      <div class="slider-row" id="row-angleN">
+        <label>North angle <span id="lbl-angleN">0°</span></label>
+        <input type="range" id="sl-angleN" min="-180" max="180" step="1" value="0">
+      </div>
+      <div class="slider-row" id="row-angleS">
+        <label>South angle <span id="lbl-angleS">180°</span></label>
+        <input type="range" id="sl-angleS" min="-180" max="180" step="1" value="180">
+      </div>
+
+      <div class="section-label">Field Lines</div>
+
+      <div class="slider-row">
+        <label>Line count <span id="lbl-nlines">16</span></label>
+        <input type="range" id="sl-nlines" min="4" max="32" step="2" value="16">
+      </div>
+      <div class="slider-row">
+        <label>Overlay opacity <span id="lbl-alpha">70%</span></label>
+        <input type="range" id="sl-alpha" min="15" max="100" value="70">
+      </div>
+
+      <div class="section-label">Field Decay</div>
+
+      <div class="slider-row">
+        <label>Distance falloff r^ <span id="lbl-decay">3.0</span></label>
+        <input type="range" id="sl-decay" min="1.5" max="4" step="0.1" value="3.0">
+      </div>
+      <div class="slider-row">
+        <label>Min cutoff radius <span id="lbl-cut">8px</span></label>
+        <input type="range" id="sl-cut" min="4" max="40" step="1" value="8">
+      </div>
+
+    </div>
+  </div>
+
   <div id="info">
-    <strong>How it works:</strong><br>
-    First, click on each ball in the camera feed to teach the app its color.
-    Then hold both objects in frame — the live magnetic field appears as an overlay.<br><br>
-    Works with any two distinctly colored objects. Bright, saturated colors against a neutral background work best.
+    <strong>Physics:</strong> Each ball is a magnetic dipole. The field is computed using the dipole formula
+    B = (3(m·r̂)r̂ − m) / r³, summed over all poles. When velocity mode is on, the dipole moment
+    direction tracks the ball's movement in real time.
   </div>
 
   <script src="app.js"></script>

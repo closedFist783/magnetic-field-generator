@@ -1,4 +1,4 @@
-// ─── Canvas / video setup ────────────────────────────────────────────────────
+// ─── Setup ────────────────────────────────────────────────────────────────────
 const video  = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
@@ -7,24 +7,44 @@ const W = 640, H = 480;
 canvas.width  = W;
 canvas.height = H;
 
-// Offscreen canvas for heatmap
 const offscreen = document.createElement('canvas');
 
-// ─── State ────────────────────────────────────────────────────────────────────
-// 'init' → 'cal-0' → 'cal-1' → 'tracking'
 let appState     = 'init';
-let mode         = 'arrows';
-let overlayAlpha = 0.70;
+let mode         = 'lines';
 let demoMode     = false;
 let dragging     = null;
+let lastFrameTime = performance.now();
+
+// ─── Physics params (read from sliders) ──────────────────────────────────────
+const phys = {
+  qN: 1.0, qS: 1.0,
+  angleN: 0, angleS: Math.PI,
+  velMode: true,
+  nLines: 16,
+  alpha: 0.70,
+  decay: 3.0,
+  cutoff: 8,
+};
 
 // ─── Poles ────────────────────────────────────────────────────────────────────
 const poles = [
-  { name: 'North', charge: +1, label: 'N (+)', cssColor: '#f55', x: W * 0.35, y: H * 0.5, detected: false, color: null },
-  { name: 'South', charge: -1, label: 'S (−)', cssColor: '#55f', x: W * 0.65, y: H * 0.5, detected: false, color: null },
+  {
+    name: 'North', charge: +1, cssColor: '#f55', label: 'N',
+    x: W * 0.35, y: H * 0.5, detected: false, color: null,
+    crosshair: null,
+    vx: 0, vy: 0, prevX: W * 0.35, prevY: H * 0.5,
+    momentAngle: 0,           // updated each frame
+    smoothVx: 0, smoothVy: 0  // smoothed velocity
+  },
+  {
+    name: 'South', charge: -1, cssColor: '#55f', label: 'S',
+    x: W * 0.65, y: H * 0.5, detected: false, color: null,
+    crosshair: null,
+    vx: 0, vy: 0, prevX: W * 0.65, prevY: H * 0.5,
+    momentAngle: Math.PI,
+    smoothVx: 0, smoothVy: 0
+  },
 ];
-
-// color: { hue, hTol, minS, minV }  — learned during calibration
 
 // ─── Webcam ───────────────────────────────────────────────────────────────────
 navigator.mediaDevices
@@ -40,7 +60,6 @@ navigator.mediaDevices
   .catch(() => {
     demoMode = true;
     document.getElementById('no-camera-overlay').style.display = 'block';
-    // Demo mode: skip calibration, use default positions
     for (const p of poles) p.detected = true;
     appState = 'tracking';
     showTrackingUI();
@@ -51,9 +70,9 @@ navigator.mediaDevices
 function updateCalibrationUI() {
   const idx = appState === 'cal-0' ? 0 : 1;
   const p   = poles[idx];
-  document.getElementById('cal-panel').style.display = 'flex';
-  document.getElementById('cal-title').textContent   = `Step ${idx + 1} of 2`;
-  document.getElementById('cal-desc').innerHTML      =
+  document.getElementById('cal-panel').style.display   = 'flex';
+  document.getElementById('cal-title').textContent     = `Step ${idx + 1} of 2`;
+  document.getElementById('cal-desc').innerHTML        =
     `Click on your <strong style="color:${p.cssColor}">${p.name} pole</strong> ball in the camera feed.`;
   document.getElementById('cal-swatch').style.background = '#111';
   document.getElementById('cal-swatch').textContent      = '?';
@@ -62,514 +81,503 @@ function updateCalibrationUI() {
 }
 
 function showTrackingUI() {
-  document.getElementById('cal-panel').style.display    = 'none';
-  document.getElementById('tracking-ui').style.display  = 'flex';
+  document.getElementById('cal-panel').style.display   = 'none';
+  document.getElementById('tracking-ui').style.display = 'flex';
 }
 
-// ─── Canvas click → sample color ─────────────────────────────────────────────
+// ─── Click → sample color ─────────────────────────────────────────────────────
 canvas.addEventListener('click', e => {
   if (appState !== 'cal-0' && appState !== 'cal-1') return;
-
   const rect = canvas.getBoundingClientRect();
-  const cx   = Math.round((e.clientX - rect.left)  * (W / rect.width));
-  const cy   = Math.round((e.clientY - rect.top)   * (H / rect.height));
+  const cx   = Math.round((e.clientX - rect.left) * (W / rect.width));
+  const cy   = Math.round((e.clientY - rect.top)  * (H / rect.height));
 
   const sample = sampleRegion(cx, cy, 24);
   if (!sample) return;
 
   const idx = appState === 'cal-0' ? 0 : 1;
   poles[idx].color = sample;
-
-  // Show swatch in cal panel
-  const sw = document.getElementById('cal-swatch');
-  sw.style.background = `hsl(${sample.hue},80%,50%)`;
-  sw.textContent      = '';
-
-  // Update debug bar
-  updateDebugBar(idx, sample);
-
-  // Store crosshair position so the loop keeps redrawing it
   poles[idx].crosshair = { x: cx, y: cy };
 
+  document.getElementById('cal-swatch').style.background = `hsl(${sample.hue},80%,50%)`;
+  document.getElementById('cal-swatch').textContent      = '';
+  updateDebugBar(idx, sample);
   document.getElementById('btn-cal-confirm').disabled = false;
 });
 
 document.getElementById('btn-cal-confirm').addEventListener('click', () => {
-  if (appState === 'cal-0') {
-    appState = 'cal-1';
-    updateCalibrationUI();
-  } else if (appState === 'cal-1') {
-    appState = 'tracking';
-    showTrackingUI();
-  }
+  if (appState === 'cal-0') { appState = 'cal-1'; updateCalibrationUI(); }
+  else                      { appState = 'tracking'; showTrackingUI(); }
 });
 
 document.getElementById('btn-cal-redo').addEventListener('click', () => {
   appState = 'cal-0';
-  for (const p of poles) p.color = null;
+  resetPoleState();
   updateCalibrationUI();
 });
 
-// ─── Sample a region's average HSV ───────────────────────────────────────────
-// Reads directly from the already-rendered main canvas — no temp canvas needed.
-function sampleRegion(cx, cy, radius) {
-  const x0 = Math.max(0, cx - radius), y0 = Math.max(0, cy - radius);
-  const x1 = Math.min(W, cx + radius), y1 = Math.min(H, cy + radius);
-  const w  = x1 - x0, h = y1 - y0;
-  if (w <= 0 || h <= 0) return null;
-
-  let data;
-  try { data = ctx.getImageData(x0, y0, w, h).data; }
-  catch (e) { console.error('getImageData failed:', e); return null; }
-
-  // Collect all pixels (no saturation gate — just collect everything)
-  const hues = [], sats = [], vals = [];
-  for (let i = 0; i < data.length; i += 4) {
-    const [hh, ss, vv] = rgbToHsv(data[i], data[i + 1], data[i + 2]);
-    hues.push(hh); sats.push(ss); vals.push(vv);
-  }
-
-  const avgHue = circularMeanHue(hues);
-  const avgSat = sats.reduce((a, b) => a + b, 0) / sats.length;
-  const avgVal = vals.reduce((a, b) => a + b, 0) / vals.length;
-
-  // Log for debugging
-  console.log(`Sampled hue=${avgHue.toFixed(1)}° sat=${(avgSat*100).toFixed(0)}% val=${(avgVal*100).toFixed(0)}%`);
-
-  return {
-    hue:  avgHue,
-    hTol: 30,
-    minS: Math.max(0.15, avgSat * 0.35),
-    minV: Math.max(0.10, avgVal * 0.25),
-    // Store raw for display
-    avgSat, avgVal,
-  };
-}
-
-function circularMeanHue(hues) {
-  // Convert to radians, average as unit vectors
-  let sx = 0, sy = 0;
-  for (const h of hues) {
-    const r = (h / 180) * Math.PI;
-    sx += Math.cos(r); sy += Math.sin(r);
-  }
-  let mean = Math.atan2(sy / hues.length, sx / hues.length) * (180 / Math.PI);
-  if (mean < 0) mean += 360;
-  return mean;
-}
-
-function drawCrosshair(cx, cy, color) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth   = 2;
-  ctx.shadowColor = color;
-  ctx.shadowBlur  = 8;
-  const r = 24;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(cx - r - 8, cy); ctx.lineTo(cx + r + 8, cy);
-  ctx.moveTo(cx, cy - r - 8); ctx.lineTo(cx, cy + r + 8);
-  ctx.stroke();
-  ctx.restore();
-}
-
-// ─── Demo-mode drag ───────────────────────────────────────────────────────────
-function getCanvasPos(e) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: (e.clientX - rect.left) * (W / rect.width),
-    y: (e.clientY - rect.top)  * (H / rect.height)
-  };
-}
-
-canvas.addEventListener('mousedown', e => {
-  if (!demoMode || appState !== 'tracking') return;
-  const { x, y } = getCanvasPos(e);
-  for (const p of poles) {
-    if ((x - p.x) ** 2 + (y - p.y) ** 2 < 1200) { dragging = p; return; }
-  }
+document.getElementById('btn-recalibrate').addEventListener('click', () => {
+  appState = 'cal-0';
+  resetPoleState();
+  document.getElementById('tracking-ui').style.display = 'none';
+  updateCalibrationUI();
 });
-canvas.addEventListener('mousemove', e => {
-  if (!dragging) return;
-  const pos = getCanvasPos(e);
-  dragging.x = pos.x; dragging.y = pos.y;
-});
-canvas.addEventListener('mouseup',    () => dragging = null);
-canvas.addEventListener('mouseleave', () => dragging = null);
 
-canvas.addEventListener('touchstart', e => {
-  if (!demoMode || appState !== 'tracking') return;
-  e.preventDefault();
-  const rect = canvas.getBoundingClientRect();
-  const t = e.touches[0];
-  const x = (t.clientX - rect.left) * (W / rect.width);
-  const y = (t.clientY - rect.top)  * (H / rect.height);
-  for (const p of poles) {
-    if ((x - p.x) ** 2 + (y - p.y) ** 2 < 1200) { dragging = p; return; }
+function resetPoleState() {
+  for (let i = 0; i < poles.length; i++) {
+    poles[i].color = poles[i].crosshair = null;
+    poles[i].detected = false;
+    document.getElementById(`dbg-swatch-${i}`).style.background = '#111';
+    document.getElementById(`dbg-val-${i}`).textContent = 'not sampled';
+    document.getElementById(`dbg-fill-${i}`).style.width = '0';
+    document.getElementById(`dbg-bar-${i}`).style.background = '#1a2030';
   }
-}, { passive: false });
-canvas.addEventListener('touchmove', e => {
-  if (!dragging) return;
-  e.preventDefault();
-  const rect = canvas.getBoundingClientRect();
-  const t = e.touches[0];
-  dragging.x = (t.clientX - rect.left) * (W / rect.width);
-  dragging.y = (t.clientY - rect.top)  * (H / rect.height);
-}, { passive: false });
-canvas.addEventListener('touchend', () => dragging = null);
+}
 
-// ─── Controls ─────────────────────────────────────────────────────────────────
+// ─── Physics panel toggle ─────────────────────────────────────────────────────
+function togglePhysics() {
+  const body  = document.getElementById('physics-body');
+  const arrow = document.getElementById('physics-arrow');
+  const open  = body.style.display !== 'none';
+  body.style.display  = open ? 'none' : 'grid';
+  arrow.textContent   = open ? '▶' : '▼';
+}
+
+// ─── Slider wiring ────────────────────────────────────────────────────────────
+function wire(id, lblId, key, fmt) {
+  const el = document.getElementById(id);
+  const update = () => {
+    phys[key] = parseFloat(el.value);
+    if (lblId) document.getElementById(lblId).textContent = fmt(phys[key]);
+  };
+  el.addEventListener('input', update);
+  update();
+}
+
+wire('sl-qN',    'lbl-qN',     'qN',    v => v.toFixed(1));
+wire('sl-qS',    'lbl-qS',     'qS',    v => v.toFixed(1));
+wire('sl-angleN','lbl-angleN', '_aN',   v => { phys.angleN = v * Math.PI / 180; return v + '°'; });
+wire('sl-angleS','lbl-angleS', '_aS',   v => { phys.angleS = v * Math.PI / 180; return v + '°'; });
+wire('sl-nlines','lbl-nlines', 'nLines',v => Math.round(v));
+wire('sl-alpha', 'lbl-alpha',  'alpha', v => { phys.alpha = v / 100; return v + '%'; });
+wire('sl-decay', 'lbl-decay',  'decay', v => v.toFixed(1));
+wire('sl-cut',   'lbl-cut',    'cutoff',v => v + 'px');
+
+const velCheck = document.getElementById('chk-vel');
+velCheck.addEventListener('change', () => {
+  phys.velMode = velCheck.checked;
+  document.getElementById('row-angleN').style.opacity = phys.velMode ? '0.35' : '1';
+  document.getElementById('row-angleS').style.opacity = phys.velMode ? '0.35' : '1';
+});
+document.getElementById('row-angleN').style.opacity = '0.35';
+document.getElementById('row-angleS').style.opacity = '0.35';
+
+// ─── Visualization mode ───────────────────────────────────────────────────────
 function setMode(m) {
   mode = m;
   document.querySelectorAll('.btn-mode').forEach(b => b.classList.remove('active'));
   document.getElementById('btn-' + m).classList.add('active');
 }
 
-document.getElementById('alpha-slider').addEventListener('input', e => {
-  overlayAlpha = e.target.value / 100;
+// ─── Demo-mode drag ───────────────────────────────────────────────────────────
+function canvasPos(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) };
+}
+canvas.addEventListener('mousedown', e => {
+  if (!demoMode || appState !== 'tracking') return;
+  const { x, y } = canvasPos(e);
+  for (const p of poles) if ((x-p.x)**2+(y-p.y)**2 < 1200) { dragging = p; return; }
 });
-
-document.getElementById('btn-recalibrate').addEventListener('click', () => {
-  appState = 'cal-0';
-  for (let i = 0; i < poles.length; i++) {
-    poles[i].color = null;
-    poles[i].detected = false;
-    poles[i].crosshair = null;
-    document.getElementById(`dbg-swatch-${i}`).style.background = '#111';
-    document.getElementById(`dbg-val-${i}`).textContent = 'not sampled';
-    document.getElementById(`dbg-fill-${i}`).style.width = '0';
-    document.getElementById(`dbg-bar-${i}`).style.background = '#1a2030';
-  }
-  document.getElementById('tracking-ui').style.display = 'none';
-  updateCalibrationUI();
+canvas.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const pos = canvasPos(e); dragging.x = pos.x; dragging.y = pos.y;
 });
+canvas.addEventListener('mouseup',    () => dragging = null);
+canvas.addEventListener('mouseleave', () => dragging = null);
+canvas.addEventListener('touchstart', e => {
+  if (!demoMode || appState !== 'tracking') return; e.preventDefault();
+  const r = canvas.getBoundingClientRect(), t = e.touches[0];
+  const x = (t.clientX-r.left)*(W/r.width), y = (t.clientY-r.top)*(H/r.height);
+  for (const p of poles) if ((x-p.x)**2+(y-p.y)**2 < 1200) { dragging = p; return; }
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  if (!dragging) return; e.preventDefault();
+  const r = canvas.getBoundingClientRect(), t = e.touches[0];
+  dragging.x = (t.clientX-r.left)*(W/r.width); dragging.y = (t.clientY-r.top)*(H/r.height);
+}, { passive: false });
+canvas.addEventListener('touchend', () => dragging = null);
 
 // ─── Main loop ────────────────────────────────────────────────────────────────
-function loop() {
+function loop(ts) {
+  const dt = Math.min((ts - lastFrameTime) / 1000, 0.1);
+  lastFrameTime = ts;
+
   ctx.clearRect(0, 0, W, H);
 
   if (!demoMode && video.readyState >= 2) {
-    ctx.save();
-    ctx.translate(W, 0); ctx.scale(-1, 1);
-    ctx.drawImage(video, 0, 0, W, H);
-    ctx.restore();
+    ctx.save(); ctx.translate(W, 0); ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0, W, H); ctx.restore();
 
     if (appState === 'tracking') {
       const frame = ctx.getImageData(0, 0, W, H);
-      for (const p of poles) {
-        if (p.color) trackBall(frame, p);
-      }
+      for (const p of poles) { if (p.color) trackBall(frame, p, dt); }
     }
   } else if (demoMode) {
-    ctx.fillStyle = '#07070f';
-    ctx.fillRect(0, 0, W, H);
-    for (const p of poles) p.detected = true;
+    ctx.fillStyle = '#07070f'; ctx.fillRect(0, 0, W, H);
+    for (const p of poles) {
+      // Derive a gentle demo velocity from drag
+      p.smoothVx = p.smoothVx * 0.85 + (p.x - p.prevX) / dt * 0.15;
+      p.smoothVy = p.smoothVy * 0.85 + (p.y - p.prevY) / dt * 0.15;
+      if (Math.hypot(p.smoothVx, p.smoothVy) > 5) p.momentAngle = Math.atan2(p.smoothVy, p.smoothVx);
+      p.prevX = p.x; p.prevY = p.y;
+      p.detected = true;
+    }
   }
 
-  // During calibration: keep crosshairs visible over the live feed
+  // Calibration crosshairs
   if (appState === 'cal-0' || appState === 'cal-1') {
-    for (const p of poles) {
-      if (p.crosshair) drawCrosshair(p.crosshair.x, p.crosshair.y, p.cssColor);
-    }
+    for (const p of poles) if (p.crosshair) drawCrosshair(p.crosshair.x, p.crosshair.y, p.cssColor);
   }
 
   if (appState === 'tracking') {
     updateIndicators();
-    refreshDebugBars();
     const active = poles.filter(p => p.detected);
     if (active.length > 0) drawField(active);
-    for (const p of poles) {
-      if (p.detected) drawMarker(p);
-    }
+    for (const p of active) drawMarker(p);
   }
 
   requestAnimationFrame(loop);
 }
 
-// ─── Color tracking ───────────────────────────────────────────────────────────
+// ─── Color tracking / blob clustering ────────────────────────────────────────
 function rgbToHsv(r, g, b) {
   r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
-  let h, s = max === 0 ? 0 : d / max, v = max;
-  if (d === 0) { h = 0; }
-  else {
-    switch (max) {
-      case r: h = ((g - b) / d % 6) * 60; break;
-      case g: h = ((b - r) / d + 2) * 60; break;
-      case b: h = ((r - g) / d + 4) * 60; break;
+  const max = Math.max(r,g,b), min = Math.min(r,g,b), d = max-min;
+  let h, s = max===0 ? 0 : d/max, v = max;
+  if (d===0) { h=0; } else {
+    switch(max) {
+      case r: h=((g-b)/d%6)*60; break;
+      case g: h=((b-r)/d+2)*60; break;
+      case b: h=((r-g)/d+4)*60; break;
     }
-    if (h < 0) h += 360;
+    if (h<0) h+=360;
   }
-  return [h, s, v];
+  return [h,s,v];
+}
+function inHueTol(h,center,tol) {
+  let d = Math.abs(h-center)%360; if(d>180) d=360-d; return d<=tol;
 }
 
-function inHueTol(h, center, tol) {
-  let diff = Math.abs(h - center) % 360;
-  if (diff > 180) diff = 360 - diff;
-  return diff <= tol;
-}
-
-// ─── Blob-based tracking ──────────────────────────────────────────────────────
-// Finds all pixel clusters matching a pole's color, then picks the cluster
-// nearest to the pole's last known position — so two same-color balls
-// track independently.
-
-const GRID = 8; // sample every Npx for performance
-
-function trackBall(frame, pole) {
-  const data = frame.data;
-  const { hue, hTol, minS, minV } = pole.color;
-
-  // 1. Collect matching grid cells
+const GRID = 8;
+function trackBall(frame, pole, dt) {
+  const data = frame.data, {hue,hTol,minS,minV} = pole.color;
   const pts = [];
-  for (let y = 0; y < H; y += GRID) {
-    for (let x = 0; x < W; x += GRID) {
-      const i = (y * W + x) * 4;
-      const [h, s, v] = rgbToHsv(data[i], data[i + 1], data[i + 2]);
-      if (s >= minS && v >= minV && inHueTol(h, hue, hTol)) {
-        pts.push({ x, y });
-      }
-    }
+  for (let y=0; y<H; y+=GRID) for (let x=0; x<W; x+=GRID) {
+    const i=(y*W+x)*4, [h,s,v]=rgbToHsv(data[i],data[i+1],data[i+2]);
+    if (s>=minS && v>=minV && inHueTol(h,hue,hTol)) pts.push({x,y});
   }
-
   if (pts.length < 4) { pole.detected = false; return; }
 
-  // 2. Cluster by proximity (BFS, merge cells within ~3 grid-steps)
-  const clusters = clusterPts(pts, GRID * 4);
+  const clusters = clusterPts(pts, GRID*4);
   if (clusters.length === 0) { pole.detected = false; return; }
 
-  // 3. Pick the cluster nearest to last known position
-  //    (weighted: prefer large clusters, penalise distance)
-  let best = clusters[0];
-  let bestScore = Infinity;
+  let best = clusters[0], bestScore = Infinity;
   for (const c of clusters) {
-    if (c.size < 3) continue;                          // ignore tiny specks
-    const dist = Math.hypot(c.x - pole.x, c.y - pole.y);
-    const score = dist - c.size * GRID * 0.8;          // reward big blobs
-    if (score < bestScore) { bestScore = score; best = c; }
+    if (c.size < 3) continue;
+    const dist = Math.hypot(c.x-pole.x, c.y-pole.y);
+    const score = dist - c.size * GRID * 0.8;
+    if (score < bestScore) { bestScore=score; best=c; }
   }
 
-  // 4. Smooth position with exponential moving average
   const alpha = pole.detected ? 0.45 : 1.0;
-  pole.x = pole.x * (1 - alpha) + best.x * alpha;
-  pole.y = pole.y * (1 - alpha) + best.y * alpha;
-  pole.detected = true;
+  const nx = pole.x*(1-alpha) + best.x*alpha;
+  const ny = pole.y*(1-alpha) + best.y*alpha;
+
+  // Velocity (smoothed)
+  const rawVx = (nx - pole.x) / Math.max(dt, 0.016);
+  const rawVy = (ny - pole.y) / Math.max(dt, 0.016);
+  pole.smoothVx = pole.smoothVx * 0.8 + rawVx * 0.2;
+  pole.smoothVy = pole.smoothVy * 0.8 + rawVy * 0.2;
+
+  pole.x = nx; pole.y = ny; pole.detected = true;
+
+  if (phys.velMode && Math.hypot(pole.smoothVx, pole.smoothVy) > 4) {
+    pole.momentAngle = Math.atan2(pole.smoothVy, pole.smoothVx);
+  } else if (!phys.velMode) {
+    pole.momentAngle = (pole.charge > 0) ? phys.angleN : phys.angleS;
+  }
 }
 
 function clusterPts(pts, maxDist) {
-  const used = new Uint8Array(pts.length);
-  const clusters = [];
-  const maxD2 = maxDist * maxDist;
-
-  for (let i = 0; i < pts.length; i++) {
+  const used = new Uint8Array(pts.length), clusters = [], d2 = maxDist*maxDist;
+  for (let i=0; i<pts.length; i++) {
     if (used[i]) continue;
-    const members = [i];
-    used[i] = 1;
-    // BFS
-    for (let qi = 0; qi < members.length; qi++) {
-      const ci = members[qi];
-      for (let j = 0; j < pts.length; j++) {
+    const mem=[i]; used[i]=1;
+    for (let qi=0; qi<mem.length; qi++) {
+      const ci=mem[qi];
+      for (let j=0; j<pts.length; j++) {
         if (used[j]) continue;
-        const dx = pts[j].x - pts[ci].x, dy = pts[j].y - pts[ci].y;
-        if (dx * dx + dy * dy <= maxD2) { used[j] = 1; members.push(j); }
+        const dx=pts[j].x-pts[ci].x, dy=pts[j].y-pts[ci].y;
+        if (dx*dx+dy*dy<=d2) { used[j]=1; mem.push(j); }
       }
     }
-    // Centroid
-    let sx = 0, sy = 0;
-    for (const idx of members) { sx += pts[idx].x; sy += pts[idx].y; }
-    clusters.push({ x: sx / members.length, y: sy / members.length, size: members.length });
+    let sx=0,sy=0; for(const k of mem){sx+=pts[k].x;sy+=pts[k].y;}
+    clusters.push({x:sx/mem.length,y:sy/mem.length,size:mem.length});
   }
   return clusters;
 }
 
-// ─── Field math ───────────────────────────────────────────────────────────────
-function fieldAt(x, y, activePoles) {
-  let fx = 0, fy = 0;
-  for (const p of activePoles) {
-    const dx = x - p.x, dy = y - p.y;
-    const r2 = dx * dx + dy * dy;
-    if (r2 < 64) continue;
-    const r = Math.sqrt(r2);
-    const k = p.charge / r2;
-    fx += k * dx / r; fy += k * dy / r;
+// ─── Dipole field math ────────────────────────────────────────────────────────
+function fieldAt(x, y, active) {
+  let fx=0, fy=0;
+  for (const p of active) {
+    const dx=x-p.x, dy=y-p.y, r2=dx*dx+dy*dy;
+    if (r2 < phys.cutoff**2) continue;
+    const r  = Math.sqrt(r2);
+    const rn = phys.decay;          // configurable exponent
+
+    // Effective moment = charge sign * strength * unit vector along momentAngle
+    const str = (p.charge > 0 ? phys.qN : phys.qS) * p.charge;
+    const momentAngle = phys.velMode ? p.momentAngle : (p.charge>0 ? phys.angleN : phys.angleS);
+    const mx  = str * Math.cos(momentAngle);
+    const my  = str * Math.sin(momentAngle);
+
+    // Dipole field: B = [3(m·r̂)r̂ − m] / r^n
+    const rdotr_hat = (mx*dx + my*dy) / r;   // m · r̂  (unnorm)
+    const rn_val    = Math.pow(r, rn);
+    fx += (3 * rdotr_hat * (dx/r) - mx) / rn_val;
+    fy += (3 * rdotr_hat * (dy/r) - my) / rn_val;
   }
   return [fx, fy];
 }
 
 // ─── Visualization ────────────────────────────────────────────────────────────
 function drawField(active) {
-  if (mode === 'arrows') drawArrows(active);
-  else if (mode === 'lines') drawFieldLines(active);
-  else if (mode === 'heat') drawHeatmap(active);
+  if      (mode === 'lines')  drawFieldLines(active);
+  else if (mode === 'arrows') drawArrows(active);
+  else if (mode === 'heat')   drawHeatmap(active);
 }
 
-function drawArrows(active) {
-  const step = 28;
-  ctx.save(); ctx.globalAlpha = overlayAlpha;
-  for (let y = step / 2; y < H; y += step) {
-    for (let x = step / 2; x < W; x += step) {
-      const [fx, fy] = fieldAt(x, y, active);
-      const mag = Math.hypot(fx, fy);
-      if (mag < 1e-8) continue;
-      const nx = fx / mag, ny = fy / mag;
-      const len = Math.min(step * 0.78, 400 * mag);
-      if (len < 3) continue;
-      const angle = Math.atan2(fy, fx);
-      const hue   = ((angle + Math.PI) / (2 * Math.PI)) * 360;
-      const bri   = Math.min(88, 48 + Math.log10(mag * 1000 + 1) * 15);
-      const x1 = x - nx * len / 2, y1 = y - ny * len / 2;
-      const x2 = x + nx * len / 2, y2 = y + ny * len / 2;
-      const hl  = Math.max(5, len * 0.28);
-      ctx.strokeStyle = `hsl(${hue},95%,${bri}%)`;
-      ctx.lineWidth   = 1.6;
-      ctx.beginPath();
-      ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-      ctx.moveTo(x2 - hl * Math.cos(angle - 0.45), y2 - hl * Math.sin(angle - 0.45));
-      ctx.lineTo(x2, y2);
-      ctx.lineTo(x2 - hl * Math.cos(angle + 0.45), y2 - hl * Math.sin(angle + 0.45));
-      ctx.stroke();
-    }
-  }
-  ctx.restore();
-}
-
+// — Field lines with arrows —
 function drawFieldLines(active) {
-  const northPoles = active.filter(p => p.charge > 0);
-  const nLines = 18, stepSize = 5, maxSteps = 250;
-  const seeds    = northPoles.length > 0 ? northPoles : active.filter(p => p.charge < 0);
-  const reversed = northPoles.length === 0;
-  ctx.save(); ctx.globalAlpha = overlayAlpha; ctx.lineWidth = 1.6;
-  for (const pole of seeds) {
+  const nLines  = phys.nLines;
+  const stepSz  = 4;
+  const maxStep = 400;
+  const arrowEvery = 36; // px between arrowheads
+
+  ctx.save();
+  ctx.globalAlpha = phys.alpha;
+  ctx.lineWidth   = 1.8;
+
+  for (const pole of active) {
     for (let i = 0; i < nLines; i++) {
-      const a = (i / nLines) * Math.PI * 2;
-      let x = pole.x + 20 * Math.cos(a);
-      let y = pole.y + 20 * Math.sin(a);
-      const pts = [[x, y]];
-      for (let s = 0; s < maxSteps; s++) {
+      const a   = (i / nLines) * Math.PI * 2;
+      let x     = pole.x + 22 * Math.cos(a);
+      let y     = pole.y + 22 * Math.sin(a);
+      const pts = [{ x, y }];
+      let travelSinceArrow = 0;
+      const arrowPts = [];
+
+      for (let s = 0; s < maxStep; s++) {
         const [fx, fy] = fieldAt(x, y, active);
         const mag = Math.hypot(fx, fy);
-        if (mag < 1e-8) break;
-        x += (reversed ? -1 : 1) * (fx / mag) * stepSize;
-        y += (reversed ? -1 : 1) * (fy / mag) * stepSize;
-        if (x < 0 || x > W || y < 0 || y > H) break;
-        pts.push([x, y]);
-        const hitSink = active.find(p => p.charge !== pole.charge && Math.hypot(p.x - x, p.y - y) < 18);
-        if (hitSink) break;
+        if (mag < 1e-9) break;
+        const nx = fx/mag, ny = fy/mag;
+
+        // Adaptive step: smaller near poles
+        const minDist = Math.min(...active.map(p => Math.hypot(x-p.x, y-p.y)));
+        const step = Math.max(1.5, Math.min(stepSz, minDist * 0.3));
+
+        x += nx * step;
+        y += ny * step;
+        if (x<-10||x>W+10||y<-10||y>H+10) break;
+
+        pts.push({ x, y });
+        travelSinceArrow += step;
+
+        if (travelSinceArrow >= arrowEvery) {
+          arrowPts.push({ x, y, dx: nx, dy: ny });
+          travelSinceArrow = 0;
+        }
+
+        if (active.some(p => Math.hypot(p.x-x, p.y-y) < 14)) break;
       }
-      if (pts.length < 3) continue;
-      const grad = ctx.createLinearGradient(pts[0][0], pts[0][1], pts[pts.length-1][0], pts[pts.length-1][1]);
-      grad.addColorStop(0,   reversed ? '#55f' : '#f55');
-      grad.addColorStop(0.5, '#aaf');
-      grad.addColorStop(1,   reversed ? '#f55' : '#55f');
+
+      if (pts.length < 4) continue;
+
+      // Draw line
+      const grad = ctx.createLinearGradient(pts[0].x, pts[0].y, pts[pts.length-1].x, pts[pts.length-1].y);
+      grad.addColorStop(0,   '#f66');
+      grad.addColorStop(0.5, '#adf');
+      grad.addColorStop(1,   '#66f');
       ctx.strokeStyle = grad;
       ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
       ctx.stroke();
+
+      // Draw arrows along the line
+      for (const ap of arrowPts) {
+        const angle = Math.atan2(ap.dy, ap.dx);
+        const hl = 8;
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth   = 1.5;
+        ctx.globalAlpha = phys.alpha * 0.9;
+        ctx.beginPath();
+        ctx.moveTo(ap.x - hl*Math.cos(angle-0.4), ap.y - hl*Math.sin(angle-0.4));
+        ctx.lineTo(ap.x, ap.y);
+        ctx.lineTo(ap.x - hl*Math.cos(angle+0.4), ap.y - hl*Math.sin(angle+0.4));
+        ctx.stroke();
+        ctx.lineWidth = 1.8;
+        ctx.globalAlpha = phys.alpha;
+      }
     }
   }
   ctx.restore();
 }
 
+// — Vector arrows —
+function drawArrows(active) {
+  const step = 28;
+  ctx.save(); ctx.globalAlpha = phys.alpha;
+  for (let y=step/2; y<H; y+=step) for (let x=step/2; x<W; x+=step) {
+    const [fx,fy] = fieldAt(x,y,active);
+    const mag = Math.hypot(fx,fy);
+    if (mag<1e-8) continue;
+    const nx=fx/mag, ny=fy/mag;
+    const len = Math.min(step*0.78, 400*mag);
+    if (len<3) continue;
+    const angle = Math.atan2(fy,fx);
+    const hue   = ((angle+Math.PI)/(2*Math.PI))*360;
+    const bri   = Math.min(88, 48+Math.log10(mag*1000+1)*15);
+    const x1=x-nx*len/2, y1=y-ny*len/2, x2=x+nx*len/2, y2=y+ny*len/2;
+    const hl=Math.max(5,len*0.3);
+    ctx.strokeStyle=`hsl(${hue},95%,${bri}%)`; ctx.lineWidth=1.6;
+    ctx.beginPath();
+    ctx.moveTo(x1,y1); ctx.lineTo(x2,y2);
+    ctx.moveTo(x2-hl*Math.cos(angle-0.45),y2-hl*Math.sin(angle-0.45));
+    ctx.lineTo(x2,y2);
+    ctx.lineTo(x2-hl*Math.cos(angle+0.45),y2-hl*Math.sin(angle+0.45));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// — Heatmap —
 function drawHeatmap(active) {
-  const scale = 5;
-  const sw = Math.ceil(W / scale), sh = Math.ceil(H / scale);
-  offscreen.width = sw; offscreen.height = sh;
-  const octx = offscreen.getContext('2d');
-  const img  = octx.createImageData(sw, sh);
-  const d    = img.data;
-  for (let py = 0; py < sh; py++) {
-    for (let px = 0; px < sw; px++) {
-      const [fx, fy] = fieldAt(px * scale, py * scale, active);
-      const mag   = Math.hypot(fx, fy);
-      const angle = Math.atan2(fy, fx);
-      const hue   = ((angle + Math.PI) / (2 * Math.PI)) * 360;
-      const t     = Math.min(1, Math.log10(mag * 800 + 1) / 4);
-      const [r, g, b] = hslToRgb(hue / 360, 0.9, 0.1 + t * 0.55);
-      const i = (py * sw + px) * 4;
-      d[i] = r; d[i+1] = g; d[i+2] = b; d[i+3] = Math.round(overlayAlpha * 210);
-    }
+  const scale=5, sw=Math.ceil(W/scale), sh=Math.ceil(H/scale);
+  offscreen.width=sw; offscreen.height=sh;
+  const octx=offscreen.getContext('2d'), img=octx.createImageData(sw,sh), d=img.data;
+  for (let py=0;py<sh;py++) for (let px=0;px<sw;px++) {
+    const [fx,fy]=fieldAt(px*scale,py*scale,active);
+    const mag=Math.hypot(fx,fy), angle=Math.atan2(fy,fx);
+    const hue=((angle+Math.PI)/(2*Math.PI))*360;
+    const t=Math.min(1,Math.log10(mag*800+1)/4);
+    const [r,g,b]=hslToRgb(hue/360,0.9,0.1+t*0.55);
+    const i=(py*sw+px)*4;
+    d[i]=r;d[i+1]=g;d[i+2]=b;d[i+3]=Math.round(phys.alpha*210);
   }
-  octx.putImageData(img, 0, 0);
+  octx.putImageData(img,0,0);
+  ctx.save(); ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+  ctx.drawImage(offscreen,0,0,W,H); ctx.restore();
+}
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+function hslToRgb(h,s,l) {
+  const f=(p,q,t)=>{if(t<0)t+=1;if(t>1)t-=1;if(t<1/6)return p+(q-p)*6*t;if(t<1/2)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p;};
+  if(s===0)return[l,l,l].map(v=>Math.round(v*255));
+  const q=l<0.5?l*(1+s):l+s-l*s,p=2*l-q;
+  return[Math.round(f(p,q,h+1/3)*255),Math.round(f(p,q,h)*255),Math.round(f(p,q,h-1/3)*255)];
+}
+
+function drawMarker(p) {
   ctx.save();
-  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(offscreen, 0, 0, W, H);
+  // Velocity arrow (if moving)
+  const spd = Math.hypot(p.smoothVx, p.smoothVy);
+  if (spd > 5) {
+    const vlen = Math.min(50, spd * 0.15);
+    const vx = p.smoothVx/spd, vy = p.smoothVy/spd;
+    ctx.strokeStyle = p.cssColor; ctx.lineWidth = 2; ctx.globalAlpha = 0.6;
+    ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(p.x+vx*vlen,p.y+vy*vlen); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // Moment direction indicator
+  const ma = phys.velMode ? p.momentAngle : (p.charge>0 ? phys.angleN : phys.angleS);
+  ctx.strokeStyle = p.cssColor; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.5;
+  ctx.beginPath(); ctx.moveTo(p.x,p.y);
+  ctx.lineTo(p.x+Math.cos(ma)*30, p.y+Math.sin(ma)*30); ctx.stroke();
+
+  // Circle + label
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = p.cssColor; ctx.lineWidth = 2.5;
+  ctx.shadowColor = p.cssColor; ctx.shadowBlur = 12;
+  ctx.beginPath(); ctx.arc(p.x, p.y, 20, 0, Math.PI*2); ctx.stroke();
+  ctx.shadowBlur = 0; ctx.fillStyle = p.cssColor;
+  ctx.font = 'bold 12px Courier New'; ctx.textAlign = 'center';
+  ctx.fillText(p.label, p.x, p.y - 28);
   ctx.restore();
 }
 
-function hslToRgb(h, s, l) {
-  const hue2rgb = (p, q, t) => {
-    if (t < 0) t += 1; if (t > 1) t -= 1;
-    if (t < 1/6) return p + (q-p)*6*t;
-    if (t < 1/2) return q;
-    if (t < 2/3) return p + (q-p)*(2/3-t)*6;
-    return p;
-  };
-  if (s === 0) return [l,l,l].map(v => Math.round(v*255));
-  const q = l < 0.5 ? l*(1+s) : l+s-l*s, p = 2*l-q;
-  return [
-    Math.round(hue2rgb(p, q, h+1/3)*255),
-    Math.round(hue2rgb(p, q, h    )*255),
-    Math.round(hue2rgb(p, q, h-1/3)*255),
-  ];
+function drawCrosshair(cx, cy, color) {
+  ctx.save();
+  ctx.strokeStyle=color; ctx.lineWidth=2; ctx.shadowColor=color; ctx.shadowBlur=8;
+  const r=24;
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx-r-8,cy); ctx.lineTo(cx+r+8,cy);
+  ctx.moveTo(cx,cy-r-8); ctx.lineTo(cx,cy+r+8);
+  ctx.stroke(); ctx.restore();
+}
+
+function updateIndicators() {
+  document.getElementById('dot-north').className='dot'+(poles[0].detected?' on':'');
+  document.getElementById('dot-south').className='dot'+(poles[1].detected?' on':'');
+}
+
+// ─── Sampling ─────────────────────────────────────────────────────────────────
+function sampleRegion(cx, cy, radius) {
+  const x0=Math.max(0,cx-radius),y0=Math.max(0,cy-radius);
+  const x1=Math.min(W,cx+radius),y1=Math.min(H,cy+radius);
+  const w=x1-x0,h=y1-y0;
+  if(w<=0||h<=0) return null;
+  let data; try{data=ctx.getImageData(x0,y0,w,h).data;}catch(e){return null;}
+  const hues=[],sats=[],vals=[];
+  for(let i=0;i<data.length;i+=4){
+    const[hh,ss,vv]=rgbToHsv(data[i],data[i+1],data[i+2]);
+    hues.push(hh);sats.push(ss);vals.push(vv);
+  }
+  const avgHue=circularMeanHue(hues);
+  const avgSat=sats.reduce((a,b)=>a+b,0)/sats.length;
+  const avgVal=vals.reduce((a,b)=>a+b,0)/vals.length;
+  console.log(`Sample: hue=${avgHue.toFixed(1)} sat=${(avgSat*100).toFixed(0)}% val=${(avgVal*100).toFixed(0)}%`);
+  return{hue:avgHue,hTol:30,minS:Math.max(0.15,avgSat*0.35),minV:Math.max(0.10,avgVal*0.25),avgSat,avgVal};
+}
+
+function circularMeanHue(hues) {
+  let sx=0,sy=0;
+  for(const h of hues){const r=(h/180)*Math.PI;sx+=Math.cos(r);sy+=Math.sin(r);}
+  let m=Math.atan2(sy/hues.length,sx/hues.length)*(180/Math.PI);
+  return m<0?m+360:m;
 }
 
 // ─── Debug bar ────────────────────────────────────────────────────────────────
 function updateDebugBar(idx, color) {
   if (!color) return;
-  const hue  = Math.round(color.hue);
-  const tol  = color.hTol;
-  const sat  = Math.round((color.avgSat || color.minS / 0.35) * 100);
-  const val  = Math.round((color.avgVal || color.minV / 0.25) * 100);
-  const minS = Math.round(color.minS * 100);
-  const minV = Math.round(color.minV * 100);
-
-  // Swatch uses the actual average hue+sat+val so it matches what was clicked
-  document.getElementById(`dbg-swatch-${idx}`).style.background =
-    `hsl(${hue}, ${Math.min(100, sat)}%, ${Math.round(val / 2)}%)`;
-
-  document.getElementById(`dbg-val-${idx}`).textContent =
-    `hue ${hue}° ±${tol}°   sat ${sat}% (min ${minS}%)   val ${val}% (min ${minV}%)`;
-
-  // Hue range bar
-  const bar  = document.getElementById(`dbg-bar-${idx}`);
-  const fill = document.getElementById(`dbg-fill-${idx}`);
-  const lo   = ((hue - tol + 360) % 360) / 360 * 100;
-  const width = Math.min(100, (tol * 2) / 360 * 100);
-  fill.style.left       = `${lo}%`;
-  fill.style.width      = `${width}%`;
-  fill.style.background = `hsl(${hue}, 100%, 65%)`;
-  fill.style.boxShadow  = `0 0 4px hsl(${hue},100%,65%)`;
-
-  bar.style.background =
-    'linear-gradient(to right,' +
-    'hsl(0,85%,45%),hsl(30,85%,45%),hsl(60,85%,45%),' +
-    'hsl(90,85%,45%),hsl(120,85%,45%),hsl(150,85%,45%),' +
-    'hsl(180,85%,45%),hsl(210,85%,45%),hsl(240,85%,45%),' +
-    'hsl(270,85%,45%),hsl(300,85%,45%),hsl(330,85%,45%),hsl(360,85%,45%))';
+  const hue=Math.round(color.hue), tol=color.hTol;
+  const sat=Math.round((color.avgSat||color.minS/0.35)*100);
+  const val=Math.round((color.avgVal||color.minV/0.25)*100);
+  document.getElementById(`dbg-swatch-${idx}`).style.background=`hsl(${hue},${Math.min(100,sat)}%,${Math.round(val/2)}%)`;
+  document.getElementById(`dbg-val-${idx}`).textContent=`hue ${hue}° ±${tol}°   sat ${sat}%   val ${val}%`;
+  const bar=document.getElementById(`dbg-bar-${idx}`);
+  const fill=document.getElementById(`dbg-fill-${idx}`);
+  const lo=((hue-tol+360)%360)/360*100;
+  fill.style.left=`${lo}%`;fill.style.width=`${Math.min(100,(tol*2)/360*100)}%`;
+  fill.style.background=`hsl(${hue},100%,65%)`;fill.style.boxShadow=`0 0 4px hsl(${hue},100%,65%)`;
+  bar.style.background='linear-gradient(to right,hsl(0,85%,45%),hsl(30,85%,45%),hsl(60,85%,45%),hsl(90,85%,45%),hsl(120,85%,45%),hsl(150,85%,45%),hsl(180,85%,45%),hsl(210,85%,45%),hsl(240,85%,45%),hsl(270,85%,45%),hsl(300,85%,45%),hsl(330,85%,45%),hsl(360,85%,45%))';
 }
 
-// Keep debug bar live during tracking so you can see if it drifts
 function refreshDebugBars() {
-  for (let i = 0; i < poles.length; i++) {
-    if (poles[i].color) updateDebugBar(i, poles[i].color);
-  }
-}
-
-function drawMarker(p) {
-  ctx.save();
-  ctx.strokeStyle = p.cssColor; ctx.lineWidth = 2.5;
-  ctx.shadowColor = p.cssColor; ctx.shadowBlur = 12;
-  ctx.beginPath(); ctx.arc(p.x, p.y, 22, 0, Math.PI * 2); ctx.stroke();
-  ctx.shadowBlur = 0; ctx.fillStyle = p.cssColor;
-  ctx.font = 'bold 12px Courier New'; ctx.textAlign = 'center';
-  ctx.fillText(p.label, p.x, p.y - 30);
-  ctx.restore();
-}
-
-function updateIndicators() {
-  document.getElementById('dot-north').className = 'dot' + (poles[0].detected ? ' on' : '');
-  document.getElementById('dot-south').className = 'dot' + (poles[1].detected ? ' on' : '');
+  for(let i=0;i<poles.length;i++) if(poles[i].color) updateDebugBar(i,poles[i].color);
 }
