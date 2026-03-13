@@ -311,24 +311,77 @@ function inHueTol(h, center, tol) {
   return diff <= tol;
 }
 
+// ─── Blob-based tracking ──────────────────────────────────────────────────────
+// Finds all pixel clusters matching a pole's color, then picks the cluster
+// nearest to the pole's last known position — so two same-color balls
+// track independently.
+
+const GRID = 8; // sample every Npx for performance
+
 function trackBall(frame, pole) {
   const data = frame.data;
   const { hue, hTol, minS, minV } = pole.color;
-  let sx = 0, sy = 0, n = 0;
-  for (let y = 0; y < H; y += 3) {
-    for (let x = 0; x < W; x += 3) {
+
+  // 1. Collect matching grid cells
+  const pts = [];
+  for (let y = 0; y < H; y += GRID) {
+    for (let x = 0; x < W; x += GRID) {
       const i = (y * W + x) * 4;
-      const [h, s, v] = rgbToHsv(data[i], data[i+1], data[i+2]);
+      const [h, s, v] = rgbToHsv(data[i], data[i + 1], data[i + 2]);
       if (s >= minS && v >= minV && inHueTol(h, hue, hTol)) {
-        sx += x; sy += y; n++;
+        pts.push({ x, y });
       }
     }
   }
-  if (n > 25) {
-    pole.x = sx / n; pole.y = sy / n; pole.detected = true;
-  } else {
-    pole.detected = false;
+
+  if (pts.length < 4) { pole.detected = false; return; }
+
+  // 2. Cluster by proximity (BFS, merge cells within ~3 grid-steps)
+  const clusters = clusterPts(pts, GRID * 4);
+  if (clusters.length === 0) { pole.detected = false; return; }
+
+  // 3. Pick the cluster nearest to last known position
+  //    (weighted: prefer large clusters, penalise distance)
+  let best = clusters[0];
+  let bestScore = Infinity;
+  for (const c of clusters) {
+    if (c.size < 3) continue;                          // ignore tiny specks
+    const dist = Math.hypot(c.x - pole.x, c.y - pole.y);
+    const score = dist - c.size * GRID * 0.8;          // reward big blobs
+    if (score < bestScore) { bestScore = score; best = c; }
   }
+
+  // 4. Smooth position with exponential moving average
+  const alpha = pole.detected ? 0.45 : 1.0;
+  pole.x = pole.x * (1 - alpha) + best.x * alpha;
+  pole.y = pole.y * (1 - alpha) + best.y * alpha;
+  pole.detected = true;
+}
+
+function clusterPts(pts, maxDist) {
+  const used = new Uint8Array(pts.length);
+  const clusters = [];
+  const maxD2 = maxDist * maxDist;
+
+  for (let i = 0; i < pts.length; i++) {
+    if (used[i]) continue;
+    const members = [i];
+    used[i] = 1;
+    // BFS
+    for (let qi = 0; qi < members.length; qi++) {
+      const ci = members[qi];
+      for (let j = 0; j < pts.length; j++) {
+        if (used[j]) continue;
+        const dx = pts[j].x - pts[ci].x, dy = pts[j].y - pts[ci].y;
+        if (dx * dx + dy * dy <= maxD2) { used[j] = 1; members.push(j); }
+      }
+    }
+    // Centroid
+    let sx = 0, sy = 0;
+    for (const idx of members) { sx += pts[idx].x; sy += pts[idx].y; }
+    clusters.push({ x: sx / members.length, y: sy / members.length, size: members.length });
+  }
+  return clusters;
 }
 
 // ─── Field math ───────────────────────────────────────────────────────────────
