@@ -270,31 +270,75 @@ function inHueTol(h,center,tol) {
 }
 
 const GRID = 8;
-function trackBall(frame, pole, dt) {
-  const data = frame.data, {hue,hTol,minS,minV} = pole.color;
-  const pts = [];
-  for (let y=0; y<H; y+=GRID) for (let x=0; x<W; x+=GRID) {
-    const i=(y*W+x)*4, [h,s,v]=rgbToHsv(data[i],data[i+1],data[i+2]);
-    if (s>=minS && v>=minV && inHueTol(h,hue,hTol)) pts.push({x,y});
-  }
-  if (pts.length < 4) { pole.detected = false; return; }
 
-  const clusters = clusterPts(pts, GRID*4);
+// O(n) grid flood-fill tracking — no more O(n²) BFS freeze
+function trackBall(frame, pole, dt) {
+  const data = frame.data, { hue, hTol, minS, minV } = pole.color;
+  const gW = Math.ceil(W / GRID), gH = Math.ceil(H / GRID);
+  // 0=empty 1=match 2=visited
+  const grid = new Uint8Array(gW * gH);
+  let matchCount = 0;
+
+  for (let gy = 0; gy < gH; gy++) {
+    for (let gx = 0; gx < gW; gx++) {
+      const px = gx * GRID, py = gy * GRID;
+      const i  = (py * W + px) * 4;
+      const [h, s, v] = rgbToHsv(data[i], data[i+1], data[i+2]);
+      if (s >= minS && v >= minV && inHueTol(h, hue, hTol)) {
+        grid[gy * gW + gx] = 1;
+        matchCount++;
+      }
+    }
+  }
+
+  // Too many matches → probably the background; give up this frame
+  if (matchCount < 4 || matchCount > gW * gH * 0.25) {
+    pole.detected = matchCount > gW * gH * 0.25 ? false : pole.detected; // hold last pos on noise
+    if (matchCount < 4) pole.detected = false;
+    return;
+  }
+
+  // Grid flood-fill — O(n), each cell visited once
+  const clusters = [];
+  const stack = [];
+  for (let gy = 0; gy < gH; gy++) {
+    for (let gx = 0; gx < gW; gx++) {
+      if (grid[gy * gW + gx] !== 1) continue;
+      stack.length = 0;
+      stack.push(gx, gy);
+      grid[gy * gW + gx] = 2;
+      let sx = 0, sy = 0, size = 0;
+      while (stack.length > 0) {
+        const cy = stack.pop(), cx = stack.pop();
+        sx += cx * GRID; sy += cy * GRID; size++;
+        // 4-connected neighbours
+        for (const [nx, ny] of [[cx-1,cy],[cx+1,cy],[cx,cy-1],[cx,cy+1]]) {
+          if (nx < 0 || nx >= gW || ny < 0 || ny >= gH) continue;
+          if (grid[ny * gW + nx] !== 1) continue;
+          grid[ny * gW + nx] = 2;
+          stack.push(nx, ny);
+        }
+      }
+      if (size >= 3) clusters.push({ x: sx/size, y: sy/size, size });
+    }
+  }
+
   if (clusters.length === 0) { pole.detected = false; return; }
 
+  // Pick cluster nearest to last known position (reward size, penalise distance)
   let best = clusters[0], bestScore = Infinity;
   for (const c of clusters) {
-    if (c.size < 3) continue;
-    const dist = Math.hypot(c.x-pole.x, c.y-pole.y);
+    const dist  = Math.hypot(c.x - pole.x, c.y - pole.y);
     const score = dist - c.size * GRID * 0.8;
-    if (score < bestScore) { bestScore=score; best=c; }
+    if (score < bestScore) { bestScore = score; best = c; }
   }
 
-  const alpha = pole.detected ? 0.45 : 1.0;
-  const nx = pole.x*(1-alpha) + best.x*alpha;
-  const ny = pole.y*(1-alpha) + best.y*alpha;
+  // Smooth position
+  const a  = pole.detected ? 0.45 : 1.0;
+  const nx = pole.x * (1-a) + best.x * a;
+  const ny = pole.y * (1-a) + best.y * a;
 
-  // Velocity (smoothed)
+  // Velocity
   const rawVx = (nx - pole.x) / Math.max(dt, 0.016);
   const rawVy = (ny - pole.y) / Math.max(dt, 0.016);
   pole.smoothVx = pole.smoothVx * 0.8 + rawVx * 0.2;
@@ -307,25 +351,6 @@ function trackBall(frame, pole, dt) {
   } else if (!phys.velMode) {
     pole.momentAngle = (pole.charge > 0) ? phys.angleN : phys.angleS;
   }
-}
-
-function clusterPts(pts, maxDist) {
-  const used = new Uint8Array(pts.length), clusters = [], d2 = maxDist*maxDist;
-  for (let i=0; i<pts.length; i++) {
-    if (used[i]) continue;
-    const mem=[i]; used[i]=1;
-    for (let qi=0; qi<mem.length; qi++) {
-      const ci=mem[qi];
-      for (let j=0; j<pts.length; j++) {
-        if (used[j]) continue;
-        const dx=pts[j].x-pts[ci].x, dy=pts[j].y-pts[ci].y;
-        if (dx*dx+dy*dy<=d2) { used[j]=1; mem.push(j); }
-      }
-    }
-    let sx=0,sy=0; for(const k of mem){sx+=pts[k].x;sy+=pts[k].y;}
-    clusters.push({x:sx/mem.length,y:sy/mem.length,size:mem.length});
-  }
-  return clusters;
 }
 
 // ─── Dipole field math ────────────────────────────────────────────────────────
@@ -552,7 +577,14 @@ function sampleRegion(cx, cy, radius) {
   const avgSat=sats.reduce((a,b)=>a+b,0)/sats.length;
   const avgVal=vals.reduce((a,b)=>a+b,0)/vals.length;
   console.log(`Sample: hue=${avgHue.toFixed(1)} sat=${(avgSat*100).toFixed(0)}% val=${(avgVal*100).toFixed(0)}%`);
-  return{hue:avgHue,hTol:30,minS:Math.max(0.15,avgSat*0.35),minV:Math.max(0.10,avgVal*0.25),avgSat,avgVal};
+  // Use tighter thresholds: min saturation is at least 0.30, and at least 55% of sample sat
+  // This prevents matching desaturated backgrounds (whiteboards, walls)
+  return {
+    hue: avgHue, hTol: 28,
+    minS: Math.max(0.30, avgSat * 0.55),
+    minV: Math.max(0.15, avgVal * 0.30),
+    avgSat, avgVal,
+  };
 }
 
 function circularMeanHue(hues) {
