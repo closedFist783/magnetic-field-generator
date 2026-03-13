@@ -88,8 +88,8 @@ canvas.addEventListener('click', e => {
   // Update debug bar
   updateDebugBar(idx, sample);
 
-  // Draw crosshair on canvas
-  drawCrosshair(cx, cy, poles[idx].cssColor);
+  // Store crosshair position so the loop keeps redrawing it
+  poles[idx].crosshair = { x: cx, y: cy };
 
   document.getElementById('btn-cal-confirm').disabled = false;
 });
@@ -111,40 +111,38 @@ document.getElementById('btn-cal-redo').addEventListener('click', () => {
 });
 
 // ─── Sample a region's average HSV ───────────────────────────────────────────
+// Reads directly from the already-rendered main canvas — no temp canvas needed.
 function sampleRegion(cx, cy, radius) {
-  // Draw current frame to sample from
-  const tmp   = document.createElement('canvas');
-  tmp.width   = W; tmp.height = H;
-  const tctx  = tmp.getContext('2d');
-  tctx.translate(W, 0); tctx.scale(-1, 1);  // mirrored, same as main
-  tctx.drawImage(video, 0, 0, W, H);
-  tctx.setTransform(1, 0, 0, 1, 0, 0);
-
   const x0 = Math.max(0, cx - radius), y0 = Math.max(0, cy - radius);
   const x1 = Math.min(W, cx + radius), y1 = Math.min(H, cy + radius);
-  const w   = x1 - x0, h = y1 - y0;
+  const w  = x1 - x0, h = y1 - y0;
   if (w <= 0 || h <= 0) return null;
 
-  const data = tctx.getImageData(x0, y0, w, h).data;
+  let data;
+  try { data = ctx.getImageData(x0, y0, w, h).data; }
+  catch (e) { console.error('getImageData failed:', e); return null; }
 
-  // Collect HSV for all pixels
-  let hues = [], sats = [], vals = [];
+  // Collect all pixels (no saturation gate — just collect everything)
+  const hues = [], sats = [], vals = [];
   for (let i = 0; i < data.length; i += 4) {
-    const [hh, ss, vv] = rgbToHsv(data[i], data[i+1], data[i+2]);
-    if (ss > 0.2 && vv > 0.15) { hues.push(hh); sats.push(ss); vals.push(vv); }
+    const [hh, ss, vv] = rgbToHsv(data[i], data[i + 1], data[i + 2]);
+    hues.push(hh); sats.push(ss); vals.push(vv);
   }
-  if (hues.length < 10) return null;
 
-  const avgHue  = circularMeanHue(hues);
-  const avgSat  = hues.map((_, i) => sats[i]).reduce((a, b) => a + b, 0) / sats.length;
-  const avgVal  = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const avgHue = circularMeanHue(hues);
+  const avgSat = sats.reduce((a, b) => a + b, 0) / sats.length;
+  const avgVal = vals.reduce((a, b) => a + b, 0) / vals.length;
 
-  // Tolerance: ±25° hue, allow saturation down to 30% of sampled, value down to 20%
+  // Log for debugging
+  console.log(`Sampled hue=${avgHue.toFixed(1)}° sat=${(avgSat*100).toFixed(0)}% val=${(avgVal*100).toFixed(0)}%`);
+
   return {
     hue:  avgHue,
-    hTol: 28,
-    minS: Math.max(0.25, avgSat * 0.40),
-    minV: Math.max(0.15, avgVal * 0.30),
+    hTol: 30,
+    minS: Math.max(0.15, avgSat * 0.35),
+    minV: Math.max(0.10, avgVal * 0.25),
+    // Store raw for display
+    avgSat, avgVal,
   };
 }
 
@@ -238,6 +236,7 @@ document.getElementById('btn-recalibrate').addEventListener('click', () => {
   for (let i = 0; i < poles.length; i++) {
     poles[i].color = null;
     poles[i].detected = false;
+    poles[i].crosshair = null;
     document.getElementById(`dbg-swatch-${i}`).style.background = '#111';
     document.getElementById(`dbg-val-${i}`).textContent = 'not sampled';
     document.getElementById(`dbg-fill-${i}`).style.width = '0';
@@ -267,6 +266,13 @@ function loop() {
     ctx.fillStyle = '#07070f';
     ctx.fillRect(0, 0, W, H);
     for (const p of poles) p.detected = true;
+  }
+
+  // During calibration: keep crosshairs visible over the live feed
+  if (appState === 'cal-0' || appState === 'cal-1') {
+    for (const p of poles) {
+      if (p.crosshair) drawCrosshair(p.crosshair.x, p.crosshair.y, p.cssColor);
+    }
   }
 
   if (appState === 'tracking') {
@@ -462,33 +468,34 @@ function updateDebugBar(idx, color) {
   if (!color) return;
   const hue  = Math.round(color.hue);
   const tol  = color.hTol;
+  const sat  = Math.round((color.avgSat || color.minS / 0.35) * 100);
+  const val  = Math.round((color.avgVal || color.minV / 0.25) * 100);
   const minS = Math.round(color.minS * 100);
   const minV = Math.round(color.minV * 100);
 
-  // Swatch: show the sampled hue at full sat/lightness
+  // Swatch uses the actual average hue+sat+val so it matches what was clicked
   document.getElementById(`dbg-swatch-${idx}`).style.background =
-    `hsl(${hue}, 80%, 50%)`;
+    `hsl(${hue}, ${Math.min(100, sat)}%, ${Math.round(val / 2)}%)`;
 
-  // Text info
   document.getElementById(`dbg-val-${idx}`).textContent =
-    `hue ${hue}° ± ${tol}°  |  sat ≥ ${minS}%  val ≥ ${minV}%`;
+    `hue ${hue}° ±${tol}°   sat ${sat}% (min ${minS}%)   val ${val}% (min ${minV}%)`;
 
-  // Hue range bar: show the accepted hue window on a 360° strip
+  // Hue range bar
   const bar  = document.getElementById(`dbg-bar-${idx}`);
   const fill = document.getElementById(`dbg-fill-${idx}`);
   const lo   = ((hue - tol + 360) % 360) / 360 * 100;
-  const width = (tol * 2) / 360 * 100;
+  const width = Math.min(100, (tol * 2) / 360 * 100);
   fill.style.left       = `${lo}%`;
   fill.style.width      = `${width}%`;
-  fill.style.background = `hsl(${hue}, 90%, 55%)`;
+  fill.style.background = `hsl(${hue}, 100%, 65%)`;
+  fill.style.boxShadow  = `0 0 4px hsl(${hue},100%,65%)`;
 
-  // Full hue gradient behind the bar
   bar.style.background =
     'linear-gradient(to right,' +
-    'hsl(0,80%,45%),hsl(30,80%,45%),hsl(60,80%,45%),' +
-    'hsl(90,80%,45%),hsl(120,80%,45%),hsl(150,80%,45%),' +
-    'hsl(180,80%,45%),hsl(210,80%,45%),hsl(240,80%,45%),' +
-    'hsl(270,80%,45%),hsl(300,80%,45%),hsl(330,80%,45%),hsl(360,80%,45%))';
+    'hsl(0,85%,45%),hsl(30,85%,45%),hsl(60,85%,45%),' +
+    'hsl(90,85%,45%),hsl(120,85%,45%),hsl(150,85%,45%),' +
+    'hsl(180,85%,45%),hsl(210,85%,45%),hsl(240,85%,45%),' +
+    'hsl(270,85%,45%),hsl(300,85%,45%),hsl(330,85%,45%),hsl(360,85%,45%))';
 }
 
 // Keep debug bar live during tracking so you can see if it drifts
