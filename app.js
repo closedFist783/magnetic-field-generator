@@ -351,7 +351,7 @@ function trackBall(frame, pole, dt) {
   pole.x = nx; pole.y = ny; pole.detected = true;
 
   const speed = Math.hypot(pole.smoothVx, pole.smoothVy);
-  if (phys.velMode && speed > 40) {
+  if (phys.velMode && speed > 20) {
     // Only update moment angle when genuinely moving (min velocity = 40 px/s)
     const targetAngle = Math.atan2(pole.smoothVy, pole.smoothVx);
     const diff = targetAngle - pole.momentAngle;
