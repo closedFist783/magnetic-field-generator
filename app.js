@@ -350,8 +350,9 @@ function trackBall(frame, pole, dt) {
 
   pole.x = nx; pole.y = ny; pole.detected = true;
 
-  if (phys.velMode && Math.hypot(pole.smoothVx, pole.smoothVy) > 4) {
-    // Circular interpolation for smooth angle transitions
+  const speed = Math.hypot(pole.smoothVx, pole.smoothVy);
+  if (phys.velMode && speed > 40) {
+    // Only update moment angle when genuinely moving (min velocity = 40 px/s)
     const targetAngle = Math.atan2(pole.smoothVy, pole.smoothVx);
     const diff = targetAngle - pole.momentAngle;
     const wrapped = Math.atan2(Math.sin(diff), Math.cos(diff));
