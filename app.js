@@ -333,10 +333,14 @@ function trackBall(frame, pole, dt) {
     if (score < bestScore) { bestScore = score; best = c; }
   }
 
-  // Smooth position
-  const a  = pole.detected ? 0.45 : 1.0;
+  // Smooth position — low alpha = stickier, less jitter
+  const a  = pole.detected ? 0.12 : 1.0;
   const nx = pole.x * (1-a) + best.x * a;
   const ny = pole.y * (1-a) + best.y * a;
+
+  // Dead zone — ignore sub-3px micro-jitter
+  const moveDist = Math.hypot(nx - pole.x, ny - pole.y);
+  if (pole.detected && moveDist < 3) return;
 
   // Velocity
   const rawVx = (nx - pole.x) / Math.max(dt, 0.016);
@@ -347,7 +351,11 @@ function trackBall(frame, pole, dt) {
   pole.x = nx; pole.y = ny; pole.detected = true;
 
   if (phys.velMode && Math.hypot(pole.smoothVx, pole.smoothVy) > 4) {
-    pole.momentAngle = Math.atan2(pole.smoothVy, pole.smoothVx);
+    // Circular interpolation for smooth angle transitions
+    const targetAngle = Math.atan2(pole.smoothVy, pole.smoothVx);
+    const diff = targetAngle - pole.momentAngle;
+    const wrapped = Math.atan2(Math.sin(diff), Math.cos(diff));
+    pole.momentAngle += wrapped * 0.08;
   } else if (!phys.velMode) {
     pole.momentAngle = (pole.charge > 0) ? phys.angleN : phys.angleS;
   }
