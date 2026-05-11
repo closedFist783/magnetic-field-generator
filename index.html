@@ -27,40 +27,6 @@
       margin-top: 4px;
     }
 
-    /* ── Color debug bar ── */
-    #color-debug {
-      display: none;
-      gap: 16px;
-      align-items: stretch;
-      justify-content: center;
-      flex-wrap: wrap;
-      max-width: 640px;
-      width: 100%;
-    }
-    .color-debug-card {
-      flex: 1; min-width: 180px;
-      background: #0b0e18; border: 1px solid #1a2030;
-      border-radius: 5px; padding: 10px 14px;
-      display: flex; align-items: center; gap: 12px;
-      font-size: 0.75rem;
-    }
-    .debug-swatch {
-      width: 44px; height: 44px; border-radius: 6px;
-      background: #111; border: 2px solid #223;
-      flex-shrink: 0; transition: background 0.3s;
-    }
-    .debug-info { display: flex; flex-direction: column; gap: 3px; color: #556; line-height: 1.5; }
-    .debug-info .label { color: #889; font-weight: bold; }
-    .debug-info .val   { color: #aab; font-size: 0.82rem; }
-    .debug-info .range-bar {
-      height: 6px; border-radius: 3px; background: #1a2030;
-      width: 100px; position: relative; overflow: visible; margin-top: 2px;
-    }
-    .debug-info .range-fill {
-      position: absolute; top: 0; height: 100%;
-      border-radius: 3px; opacity: 0.85;
-    }
-
     /* ── Canvas container ── */
     #container {
       position: relative;
@@ -70,30 +36,24 @@
     }
     #canvas { display: block; max-width: 100%; height: auto; }
     video { display: none; }
-    #no-camera-overlay {
-      display: none; position: absolute;
-      top: 10px; left: 50%; transform: translateX(-50%);
-      background: #0008; border: 1px solid #336;
-      border-radius: 4px; padding: 6px 14px;
-      font-size: 0.72rem; color: #88a; white-space: nowrap; pointer-events: none;
-    }
 
-    /* ── Calibration panel ── */
-    #cal-panel {
-      display: none; flex-direction: column; align-items: center; gap: 12px;
+    /* ── Capture panel ── */
+    #capture-panel {
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
       background: #0b0e18; border: 1px solid #1e3050; border-radius: 6px;
       padding: 16px 24px; max-width: 440px; width: 100%; text-align: center;
     }
-    #cal-title { font-size: 0.75rem; color: #446; letter-spacing: 2px; text-transform: uppercase; }
-    #cal-desc  { font-size: 0.88rem; color: #aab; line-height: 1.6; }
-    #cal-swatch-wrap { display: flex; align-items: center; gap: 12px; font-size: 0.78rem; color: #556; }
-    #cal-swatch {
-      width: 36px; height: 36px; border-radius: 50%;
-      background: #111; border: 2px solid #223;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1rem; color: #446; flex-shrink: 0; transition: background 0.3s;
+    #capture-panel p { font-size: 0.85rem; color: #778899; line-height: 1.6; }
+    .capture-btns { display: flex; gap: 10px; }
+
+    /* ── Placement panel ── */
+    #place-panel {
+      display: none; flex-direction: column; align-items: center; gap: 10px;
+      background: #0b0e18; border: 1px solid #1e3050; border-radius: 6px;
+      padding: 14px 24px; max-width: 440px; width: 100%; text-align: center;
     }
-    #cal-actions { display: flex; gap: 10px; }
+    #place-title { font-size: 0.72rem; color: #446; letter-spacing: 2px; text-transform: uppercase; }
+    #place-desc  { font-size: 0.88rem; color: #aab; line-height: 1.6; }
 
     /* ── Tracking UI ── */
     #tracking-ui {
@@ -101,11 +61,10 @@
     }
 
     #status-bar { display: flex; gap: 24px; font-size: 0.8rem; }
-    .pole-status { display: flex; align-items: center; gap: 8px; }
-    .dot { width: 9px; height: 9px; border-radius: 50%; background: #222; transition: background 0.2s, box-shadow 0.2s; }
-    .dot.on { background: #3f3; box-shadow: 0 0 6px #3f3; }
+    .pole-status { display: flex; align-items: center; gap: 6px; }
     .north-label { color: #f77; }
     .south-label { color: #77f; }
+    .pos-val     { color: #445; font-size: 0.72rem; }
 
     /* ── Controls ── */
     #controls {
@@ -154,12 +113,6 @@
     .slider-row label span { color: #aab; min-width: 38px; text-align: right; }
     .slider-row input[type=range] { width: 100%; accent-color: #3a7ab5; }
 
-    .toggle-row {
-      display: flex; align-items: center; justify-content: space-between;
-      font-size: 0.72rem; color: #667; grid-column: span 2;
-    }
-    .toggle-row input[type=checkbox] { accent-color: #3a7ab5; transform: scale(1.2); }
-
     .section-label {
       font-size: 0.68rem; color: #446; text-transform: uppercase;
       letter-spacing: 2px; grid-column: span 2; margin-top: 4px;
@@ -180,66 +133,48 @@
 
   <h1>⚡ Magnetic Field Generator</h1>
 
-  <!-- Color debug bar -->
-  <div id="color-debug">
-    <div class="color-debug-card">
-      <div class="debug-swatch" id="dbg-swatch-0"></div>
-      <div class="debug-info">
-        <span class="label">North pole</span>
-        <span class="val" id="dbg-val-0">not sampled</span>
-        <div class="range-bar" id="dbg-bar-0"><div class="range-fill" id="dbg-fill-0"></div></div>
-      </div>
-    </div>
-    <div class="color-debug-card">
-      <div class="debug-swatch" id="dbg-swatch-1"></div>
-      <div class="debug-info">
-        <span class="label">South pole</span>
-        <span class="val" id="dbg-val-1">not sampled</span>
-        <div class="range-bar" id="dbg-bar-1"><div class="range-fill" id="dbg-fill-1"></div></div>
-      </div>
-    </div>
-  </div>
-
   <div id="container">
     <canvas id="canvas"></canvas>
     <video id="video" autoplay playsinline muted></video>
-    <div id="no-camera-overlay">📷 No camera — demo mode (drag poles)</div>
   </div>
 
-  <!-- Calibration panel -->
-  <div id="cal-panel">
-    <div id="cal-title">Step 1 of 2</div>
-    <div id="cal-desc">Loading camera…</div>
-    <div id="cal-swatch-wrap">
-      <div id="cal-swatch">?</div>
-      <span>Click on your ball in the camera feed above to sample its color.</span>
+  <!-- Capture panel -->
+  <div id="capture-panel">
+    <p>Take a photo or upload an image, then click to mark the two poles.</p>
+    <div class="capture-btns">
+      <button id="btn-upload">📁 Upload Image</button>
+      <button id="btn-capture" disabled>📸 Take Photo</button>
     </div>
-    <div id="cal-actions">
-      <button id="btn-cal-redo" class="danger">↺ Start over</button>
-      <button id="btn-cal-confirm" disabled>Next →</button>
-    </div>
+    <input type="file" id="file-input" accept="image/*" style="display:none">
+  </div>
+
+  <!-- Placement panel -->
+  <div id="place-panel">
+    <div id="place-title">Step 1 of 2 — Place North Pole</div>
+    <div id="place-desc">Click on the center of the <strong style="color:#f77">North</strong> sphere.</div>
+    <button id="btn-place-redo" class="danger" style="margin-top:4px">↺ Retake Photo</button>
   </div>
 
   <!-- Tracking UI -->
   <div id="tracking-ui">
     <div id="status-bar">
       <div class="pole-status">
-        <div class="dot" id="dot-north"></div>
-        <span class="north-label">North pole</span>
+        <span class="north-label">● North</span>
+        <span class="pos-val" id="pos-north"></span>
       </div>
       <div class="pole-status">
-        <div class="dot" id="dot-south"></div>
-        <span class="south-label">South pole</span>
+        <span class="south-label">● South</span>
+        <span class="pos-val" id="pos-south"></span>
       </div>
     </div>
-
     <div id="controls">
       <div class="btn-group">
         <button id="btn-lines"  class="btn-mode active" onclick="setMode('lines')">Field Lines</button>
         <button id="btn-arrows" class="btn-mode"        onclick="setMode('arrows')">Vector Field</button>
         <button id="btn-heat"   class="btn-mode"        onclick="setMode('heat')">Heatmap</button>
       </div>
-      <button id="btn-recalibrate" class="danger">↺ Recalibrate</button>
+      <button id="btn-replace" class="danger">↺ Replace Poles</button>
+      <button id="btn-retake"  class="danger">📷 New Photo</button>
     </div>
   </div>
 
@@ -261,16 +196,11 @@
         <input type="range" id="sl-qS" min="0.1" max="5" step="0.1" value="1.0">
       </div>
 
-      <div class="toggle-row">
-        <label for="chk-vel">Moment direction follows ball velocity</label>
-        <input type="checkbox" id="chk-vel" checked>
-      </div>
-
-      <div class="slider-row" id="row-angleN">
+      <div class="slider-row">
         <label>North angle <span id="lbl-angleN">0°</span></label>
         <input type="range" id="sl-angleN" min="-180" max="180" step="1" value="0">
       </div>
-      <div class="slider-row" id="row-angleS">
+      <div class="slider-row">
         <label>South angle <span id="lbl-angleS">180°</span></label>
         <input type="range" id="sl-angleS" min="-180" max="180" step="1" value="180">
       </div>
@@ -301,9 +231,8 @@
   </div>
 
   <div id="info">
-    <strong>Physics:</strong> Each ball is a magnetic dipole. The field is computed using the dipole formula
-    B = (3(m·r̂)r̂ − m) / r³, summed over all poles. When velocity mode is on, the dipole moment
-    direction tracks the ball's movement in real time.
+    <strong>Physics:</strong> Each sphere is treated as a magnetic dipole.
+    B = (3(m·r̂)r̂ − m) / r³. Drag the markers to reposition. Adjust dipole angles with the sliders.
   </div>
 
   <script src="app.js"></script>
