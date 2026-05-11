@@ -186,24 +186,24 @@
     </div>
     <div id="physics-body">
 
-      <div class="section-label">Dipole Moments</div>
+      <div class="section-label">Particle Velocity</div>
 
       <div class="slider-row">
-        <label>North strength <span id="lbl-qN">1.0</span></label>
-        <input type="range" id="sl-qN" min="0.1" max="5" step="0.1" value="1.0">
+        <label>+ charge speed <span id="lbl-speedN">1.0</span></label>
+        <input type="range" id="sl-speedN" min="0" max="5" step="0.1" value="1.0">
       </div>
       <div class="slider-row">
-        <label>South strength <span id="lbl-qS">1.0</span></label>
-        <input type="range" id="sl-qS" min="0.1" max="5" step="0.1" value="1.0">
+        <label>− charge speed <span id="lbl-speedS">1.0</span></label>
+        <input type="range" id="sl-speedS" min="0" max="5" step="0.1" value="1.0">
       </div>
 
       <div class="slider-row">
-        <label>North angle <span id="lbl-angleN">0°</span></label>
-        <input type="range" id="sl-angleN" min="-180" max="180" step="1" value="0">
+        <label>+ charge direction <span id="lbl-dirN">0°</span></label>
+        <input type="range" id="sl-dirN" min="0" max="359" step="1" value="0">
       </div>
       <div class="slider-row">
-        <label>South angle <span id="lbl-angleS">180°</span></label>
-        <input type="range" id="sl-angleS" min="-180" max="180" step="1" value="180">
+        <label>− charge direction <span id="lbl-dirS">180°</span></label>
+        <input type="range" id="sl-dirS" min="0" max="359" step="1" value="180">
       </div>
 
       <div class="section-label">Field Lines</div>
@@ -232,8 +232,7 @@
   </div>
 
   <div id="info">
-    <strong>Physics:</strong> Each sphere is treated as a magnetic dipole.
-    B = (3(m·r̂)r̂ − m) / r³. Drag the markers to reposition. Adjust dipole angles with the sliders.
+    <strong>Physics:</strong> Each sphere is a moving point charge. B<sub>z</sub> = (μ₀/4π) q(v × r̂)/r². Visualization traces iso-contours of B<sub>z</sub> — field is zero when speed is zero. Blue = out of screen, Red = into screen. Drag the markers to reposition.
   </div>
 
   <script src="app.js"></script>

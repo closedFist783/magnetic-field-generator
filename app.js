@@ -19,18 +19,16 @@ let showBg     = true;
 
 // ─── Physics params ───────────────────────────────────────────────────────────
 const phys = {
-  qN: 1.0, qS: 1.0,
-  angleN: 0, angleS: Math.PI,
   nLines: 16,
   alpha: 0.70,
   decay: 3.0,
   cutoff: 8,
 };
 
-// ─── Poles ────────────────────────────────────────────────────────────────────
+// ─── Poles (moving point charges) ────────────────────────────────────────────
 const poles = [
-  { name: 'North', charge: +1, cssColor: '#f55', label: 'N', x: W * 0.35, y: H * 0.5 },
-  { name: 'South', charge: -1, cssColor: '#55f', label: 'S', x: W * 0.65, y: H * 0.5 },
+  { name: 'North', charge: +1, cssColor: '#f55', label: 'N', x: W * 0.35, y: H * 0.5, speed: 1.0, velAngle: 0 },
+  { name: 'South', charge: -1, cssColor: '#55f', label: 'S', x: W * 0.65, y: H * 0.5, speed: 1.0, velAngle: Math.PI },
 ];
 
 // ─── Camera init ──────────────────────────────────────────────────────────────
@@ -220,10 +218,23 @@ function wire(id, lblId, key, fmt) {
   update();
 }
 
-wire('sl-qN',    'lbl-qN',     'qN',    v => v.toFixed(1));
-wire('sl-qS',    'lbl-qS',     'qS',    v => v.toFixed(1));
-wire('sl-angleN','lbl-angleN', '_aN',   v => { phys.angleN = v * Math.PI / 180; return v + '°'; });
-wire('sl-angleS','lbl-angleS', '_aS',   v => { phys.angleS = v * Math.PI / 180; return v + '°'; });
+// Particle velocity sliders — wire directly to poles array
+(function() {
+  const wP = (id, lbl, pole, key, transform, fmt) => {
+    const el = document.getElementById(id);
+    const upd = () => {
+      const v = parseFloat(el.value);
+      pole[key] = transform ? transform(v) : v;
+      if (lbl) document.getElementById(lbl).textContent = fmt(v);
+    };
+    el.addEventListener('input', upd); upd();
+  };
+  wP('sl-speedN','lbl-speedN', poles[0], 'speed',    null,               v => v.toFixed(1));
+  wP('sl-speedS','lbl-speedS', poles[1], 'speed',    null,               v => v.toFixed(1));
+  wP('sl-dirN',  'lbl-dirN',   poles[0], 'velAngle', v => v*Math.PI/180, v => Math.round(v)+'°');
+  wP('sl-dirS',  'lbl-dirS',   poles[1], 'velAngle', v => v*Math.PI/180, v => Math.round(v)+'°');
+})();
+
 wire('sl-nlines','lbl-nlines', 'nLines',v => Math.round(v));
 wire('sl-alpha', 'lbl-alpha',  'alpha', v => { phys.alpha = v / 100; return v + '%'; });
 wire('sl-decay', 'lbl-decay',  'decay', v => v.toFixed(1));
@@ -296,24 +307,39 @@ function loop() {
 // Start loop
 requestAnimationFrame(loop);
 
-// ─── Dipole field math ────────────────────────────────────────────────────────
+// ─── Biot-Savart field math (moving point charges) ───────────────────────────
+// B_z = q * (vx*dy - vy*dx) / r^decay   (z-component, Biot-Savart)
+function bzAt(x, y, active) {
+  let bz = 0;
+  for (const p of active) {
+    if (p.speed === 0) continue;
+    const dx = x - p.x, dy = y - p.y, r2 = dx*dx + dy*dy;
+    if (r2 < phys.cutoff**2) continue;
+    const rn = Math.pow(Math.sqrt(r2), phys.decay);
+    const vx = p.charge * p.speed * Math.cos(p.velAngle);
+    const vy = p.charge * p.speed * Math.sin(p.velAngle);
+    bz += (vx * dy - vy * dx) / rn;
+  }
+  return bz;
+}
+
+// 2D iso-contour flow of B_z: tangent = (-∂Bz/∂y, ∂Bz/∂x)
+// Used for field-line tracing and vector arrows
 function fieldAt(x, y, active) {
   let fx = 0, fy = 0;
   for (const p of active) {
-    const dx = x - p.x, dy = y - p.y, r2 = dx * dx + dy * dy;
-    if (r2 < phys.cutoff ** 2) continue;
-    const r  = Math.sqrt(r2);
-    const rn = phys.decay;
-
-    const str  = (p.charge > 0 ? phys.qN : phys.qS) * p.charge;
-    const mAng = p.charge > 0 ? phys.angleN : phys.angleS;
-    const mx   = str * Math.cos(mAng);
-    const my   = str * Math.sin(mAng);
-
-    const mdotr = (mx * dx + my * dy) / r;
-    const rn_v  = Math.pow(r, rn);
-    fx += (3 * mdotr * (dx / r) - mx) / rn_v;
-    fy += (3 * mdotr * (dy / r) - my) / rn_v;
+    if (p.speed === 0) continue;
+    const dx = x - p.x, dy = y - p.y, r2 = dx*dx + dy*dy;
+    if (r2 < phys.cutoff**2) continue;
+    const r   = Math.sqrt(r2);
+    const rn2 = Math.pow(r, phys.decay + 2);
+    const vx  = p.charge * p.speed * Math.cos(p.velAngle);
+    const vy  = p.charge * p.speed * Math.sin(p.velAngle);
+    const cross = vx * dy - vy * dx;
+    // -∂Bz/∂y = (-vx·r² + decay·cross·dy) / r^(decay+2)
+    //  ∂Bz/∂x = (-vy·r² - decay·cross·dx) / r^(decay+2)
+    fx += (-vx * r2 + phys.decay * cross * dy) / rn2;
+    fy += (-vy * r2 - phys.decay * cross * dx) / rn2;
   }
   return [fx, fy];
 }
@@ -426,7 +452,7 @@ function drawArrows(active) {
   ctx.restore();
 }
 
-// — Heatmap —
+// — Heatmap — signed B_z: blue = out of screen, red = into screen
 function drawHeatmap(active) {
   const scale = 5, sw = Math.ceil(W / scale), sh = Math.ceil(H / scale);
   offscreen.width = sw; offscreen.height = sh;
@@ -435,12 +461,14 @@ function drawHeatmap(active) {
   const d    = img.data;
   for (let py = 0; py < sh; py++) {
     for (let px = 0; px < sw; px++) {
-      const [fx, fy] = fieldAt(px * scale, py * scale, active);
-      const mag   = Math.hypot(fx, fy);
-      const angle = Math.atan2(fy, fx);
-      const hue   = ((angle + Math.PI) / (2 * Math.PI)) * 360;
-      const t     = Math.min(1, Math.log10(mag * 800 + 1) / 4);
-      const [r, g, b] = hslToRgb(hue / 360, 0.9, 0.1 + t * 0.55);
+      const bz = bzAt(px * scale, py * scale, active);
+      const t  = Math.min(1, Math.log10(Math.abs(bz) * 800 + 1) / 4);
+      let r, g, b;
+      if (bz >= 0) {
+        r = Math.round(30 * t); g = Math.round(80 * t); b = Math.round(255 * t);
+      } else {
+        r = Math.round(255 * t); g = Math.round(60 * t); b = Math.round(30 * t);
+      }
       const i = (py * sw + px) * 4;
       d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = Math.round(phys.alpha * 210);
     }
@@ -453,11 +481,22 @@ function drawHeatmap(active) {
 // ─── Markers & crosshairs ─────────────────────────────────────────────────────
 function drawMarker(p) {
   ctx.save();
-  // Moment direction line
-  const ma = p.charge > 0 ? phys.angleN : phys.angleS;
-  ctx.strokeStyle = p.cssColor; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.5;
-  ctx.beginPath(); ctx.moveTo(p.x, p.y);
-  ctx.lineTo(p.x + Math.cos(ma) * 30, p.y + Math.sin(ma) * 30); ctx.stroke();
+  // Velocity arrow (only when moving)
+  if (p.speed > 0) {
+    const arrowLen = 12 + p.speed * 5;
+    const ex = p.x + Math.cos(p.velAngle) * arrowLen;
+    const ey = p.y + Math.sin(p.velAngle) * arrowLen;
+    const hl = 7;
+    ctx.strokeStyle = p.cssColor; ctx.lineWidth = 2; ctx.globalAlpha = 0.8;
+    ctx.shadowColor = p.cssColor; ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y); ctx.lineTo(ex, ey);
+    ctx.moveTo(ex - hl*Math.cos(p.velAngle-0.4), ey - hl*Math.sin(p.velAngle-0.4));
+    ctx.lineTo(ex, ey);
+    ctx.lineTo(ex - hl*Math.cos(p.velAngle+0.4), ey - hl*Math.sin(p.velAngle+0.4));
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
   // Ring
   ctx.globalAlpha = 1;
   ctx.strokeStyle = p.cssColor; ctx.lineWidth = 2.5;
