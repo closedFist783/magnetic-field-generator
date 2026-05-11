@@ -15,6 +15,7 @@ let savedImage = null;   // ImageBitmap of the captured/uploaded photo
 let mode       = 'lines';
 let dragging   = null;
 let hoverPos   = null;
+let showBg     = true;
 
 // ─── Physics params ───────────────────────────────────────────────────────────
 const phys = {
@@ -168,6 +169,12 @@ canvas.addEventListener('touchend', () => { dragging = null; });
 // ─── Buttons ──────────────────────────────────────────────────────────────────
 document.getElementById('btn-place-redo').addEventListener('click', retakePhoto);
 document.getElementById('btn-retake').addEventListener('click', retakePhoto);
+document.getElementById('btn-bg-toggle').addEventListener('click', () => {
+  showBg = !showBg;
+  document.getElementById('btn-bg-toggle').textContent = showBg ? '🖼 Hide Image' : '🖼 Show Image';
+  document.getElementById('btn-bg-toggle').classList.toggle('active', !showBg);
+});
+
 document.getElementById('btn-replace').addEventListener('click', () => {
   appState = 'place-0';
   document.getElementById('tracking-ui').style.display = 'none';
@@ -261,7 +268,11 @@ function loop() {
     }
   } else if (savedImage) {
     // Static frozen image
-    ctx.drawImage(savedImage, 0, 0, W, H);
+    if (showBg) {
+      ctx.drawImage(savedImage, 0, 0, W, H);
+    } else {
+      ctx.fillStyle = '#07070f'; ctx.fillRect(0, 0, W, H);
+    }
 
     if (appState === 'place-0' || appState === 'place-1') {
       // Draw already-confirmed pole (step 1 done)
